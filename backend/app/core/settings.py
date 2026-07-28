@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     CLERK_PUBLISHABLE_KEY: str = ""
     CLERK_SECRET_KEY: str = ""
 
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "models/gemini-2.0-flash"
+
     @property
     def clerk_jwks_url(self) -> str:
         if self.CLERK_JWKS_URL:

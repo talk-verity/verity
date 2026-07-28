@@ -37,6 +37,7 @@ def verify_clerk_token(token: str) -> dict:
                 "use": key["use"],
                 "n": key["n"],
                 "e": key["e"],
+                "alg": "RS256",
             }
             break
     if not rsa_key:

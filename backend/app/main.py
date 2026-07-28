@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.auth.routes import router as auth_router
+from app.conversations.router import router as conversations_router
 from app.core.settings import settings
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
@@ -16,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
+app.include_router(conversations_router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/health")
