@@ -18,7 +18,8 @@ class TestIntegration:
         assert session.scenario == "job_interview"
 
         turns = self.service.get_turns(self.db, session.id)
-        assert len(turns) == 0
+        assert len(turns) == 1
+        assert turns[0].speaker == "ai"
 
         msg1 = self.service.respond(self.db, session.id, self.user_id, "Thanks for having me!")
         assert msg1.speaker == "ai"
@@ -27,13 +28,14 @@ class TestIntegration:
         assert msg2.speaker == "ai"
 
         all_turns = self.service.get_turns(self.db, session.id)
-        assert len(all_turns) == 4
-        assert all_turns[0].speaker == "user"
-        assert all_turns[0].content == "Thanks for having me!"
-        assert all_turns[1].speaker == "ai"
-        assert all_turns[2].speaker == "user"
-        assert all_turns[2].content == "I've been building APIs for 5 years."
-        assert all_turns[3].speaker == "ai"
+        assert len(all_turns) == 5
+        assert all_turns[0].speaker == "ai"
+        assert all_turns[1].speaker == "user"
+        assert all_turns[1].content == "Thanks for having me!"
+        assert all_turns[2].speaker == "ai"
+        assert all_turns[3].speaker == "user"
+        assert all_turns[3].content == "I've been building APIs for 5 years."
+        assert all_turns[4].speaker == "ai"
 
     def test_session_restore(self):
         session = self.service.create_session(self.db, self.user_id, "performance_review")
@@ -46,7 +48,7 @@ class TestIntegration:
         assert restored_session.status == "active"
 
         restored_turns = self.service.get_turns(self.db, session.id)
-        assert len(restored_turns) == 4
+        assert len(restored_turns) == 5
 
         ctx = self.service.build_context(restored_session, restored_turns)
         assert ctx.get_transcript() != ""

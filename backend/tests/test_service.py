@@ -55,10 +55,12 @@ class TestConversationService:
         service.delete_session(db_session, session.id, user_id)
         assert db_session.query(SessionModel).count() == 0
 
-    def test_get_turns_empty(self, db_session, service, user_id):
+    def test_get_turns_has_opening_line(self, db_session, service, user_id):
         session = service.create_session(db_session, user_id, "networking_event")
         turns = service.get_turns(db_session, session.id)
-        assert turns == []
+        assert len(turns) == 1
+        assert turns[0].speaker == "ai"
+        assert "Jordan" in turns[0].content
 
     def test_respond_creates_turns(self, db_session, service, user_id):
         session = service.create_session(db_session, user_id, "networking_event")
@@ -68,11 +70,12 @@ class TestConversationService:
         assert ai_turn.session_id == session.id
 
         turns = db_session.query(Turn).filter(Turn.session_id == session.id).order_by(Turn.created_at).all()
-        assert len(turns) == 2
-        assert turns[0].speaker == "user"
-        assert turns[0].content == "Hello there!"
-        assert turns[1].speaker == "ai"
-        assert turns[1].id == ai_turn.id
+        assert len(turns) == 3
+        assert turns[0].speaker == "ai"
+        assert turns[1].speaker == "user"
+        assert turns[1].content == "Hello there!"
+        assert turns[2].speaker == "ai"
+        assert turns[2].id == ai_turn.id
 
     def test_respond_inactive_session(self, db_session, service, user_id):
         session = service.create_session(db_session, user_id, "networking_event")

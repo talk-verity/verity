@@ -21,3 +21,8 @@ def db_session():
 @pytest.fixture
 def sample_scenario_id():
     return "networking_event"
+
+
+@pytest.fixture
+def user_id():
+    return "test-user-id"

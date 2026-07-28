@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "models/gemini-2.0-flash"
 
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    STT_PROVIDER: str = "mock"
+    WHISPER_MODEL_SIZE: str = "base"
+    WHISPER_MODEL_DIR: str = ""
+    GROQ_STT_MODEL: str = "whisper-large-v3-turbo"
+
+    TTS_PROVIDER: str = "mock"
+    TTS_VOICE: str = "en-US-JennyNeural"
+
     @property
     def clerk_jwks_url(self) -> str:
         if self.CLERK_JWKS_URL:
