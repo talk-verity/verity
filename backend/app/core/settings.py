@@ -21,5 +21,18 @@ class Settings(BaseSettings):
 
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
+    CLERK_DOMAIN: str = ""
+    CLERK_JWKS_URL: str = ""
+    CLERK_PUBLISHABLE_KEY: str = ""
+    CLERK_SECRET_KEY: str = ""
+
+    @property
+    def clerk_jwks_url(self) -> str:
+        if self.CLERK_JWKS_URL:
+            return self.CLERK_JWKS_URL
+        if self.CLERK_DOMAIN:
+            return f"https://{self.CLERK_DOMAIN}/.well-known/jwks.json"
+        return ""
+
 
 settings = Settings()
