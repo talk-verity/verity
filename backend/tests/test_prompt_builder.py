@@ -13,14 +13,14 @@ class TestPromptBuilder:
         assert "Senior Engineering Manager" in prompt
         assert "TechCorp" in prompt
         assert "Make a memorable impression" in prompt
-        assert "Conversation so far:" not in prompt
+        assert "CONVERSATION SO FAR" not in prompt
 
     def test_build_with_turns(self):
         ctx = ContextManager("networking_event")
         ctx.add_turn("user", "Hi Jordan, I'm Alice!")
         ctx.add_turn("ai", "Nice to meet you, Alice!")
         prompt = self.builder.build("networking_event", ctx)
-        assert "Conversation so far:" in prompt
+        assert "CONVERSATION SO FAR" in prompt
         assert "User: Hi Jordan" in prompt
         assert "AI: Nice to meet you" in prompt
 

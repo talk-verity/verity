@@ -12,20 +12,29 @@ class PromptBuilder:
         transcript = context_manager.get_transcript()
 
         parts = [
-            f"You are {persona['name']}, {persona['role']} at {persona['company']}.",
+            f"You are roleplaying as {persona['name']}, {persona['role']} at {persona['company']}.",
             f"Personality: {persona['personality']}",
             "",
-            f"Context: {scenario['context']}",
-            f"Your goal in this conversation: {scenario['goal']}",
+            "THE USER'S SITUATION",
+            scenario['context'],
+            "",
+            "THE USER'S GOAL",
+            scenario['goal'],
+            "",
+            "YOUR ROLE",
+            f"You are {persona['name']}. The user is talking to you. "
+            "Respond in character — stay true to your personality. "
+            "Do NOT act as the user or advocate for them. "
+            "Ask questions, challenge them, react naturally as this character would.",
             "",
         ]
 
         if transcript:
-            parts.append("Conversation so far:")
+            parts.append("CONVERSATION SO FAR")
             parts.append(transcript)
             parts.append("")
 
-        parts.append("Respond as this persona naturally would. Keep responses conversational and under 3 sentences unless the situation requires more depth.")
+        parts.append("Keep responses conversational and under 3 sentences unless the situation requires more depth.")
 
         return "\n".join(parts)
 
@@ -39,8 +48,10 @@ class PromptBuilder:
         return (
             f"You are roleplaying as {persona['name']}, {persona['role']} at {persona['company']}. "
             f"Personality: {persona['personality']}. "
-            f"Context: {scenario['context']}. "
-            f"Your goal: {scenario['goal']}. "
-            "Stay in character at all times. Keep responses concise and natural. "
+            f"The user's situation: {scenario['context']}. "
+            f"The user's goal: {scenario['goal']}. "
+            f"Stay in character as {persona['name']}. "
+            "Do not act as the user or advocate for them. "
+            "Keep responses concise and natural. "
             "Do not break character or refer to yourself as an AI."
         )

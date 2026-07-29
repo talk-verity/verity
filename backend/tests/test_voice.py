@@ -1,3 +1,7 @@
+import io
+import struct
+import wave
+
 import pytest
 
 from app.voice.service import STT_RETRY_TEXT, VoiceService
@@ -5,6 +9,17 @@ from app.voice.stt import MockSTTService
 from app.voice.tts import MockTTSService
 from app.conversations.service import ConversationService
 from app.conversations.gemini_client import MockAIService
+
+
+def _wav_bytes() -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        for _ in range(1600):
+            wf.writeframes(struct.pack("<h", 0))
+    return buf.getvalue()
 
 
 @pytest.fixture
@@ -33,7 +48,7 @@ class TestTTS:
 
 class TestVoiceService:
     def test_transcribe(self, voice_service):
-        result = voice_service.transcribe(b"fake audio data")
+        result = voice_service.transcribe(_wav_bytes())
         assert result == "Hello, this is a test transcription."
 
     @pytest.mark.asyncio
@@ -47,7 +62,7 @@ class TestVoiceService:
                 raise RuntimeError("STT failed")
 
         service = VoiceService(stt=FailingSTT(), tts=MockTTSService())
-        result = service.transcribe(b"broken audio")
+        result = service.transcribe(_wav_bytes())
         assert result == STT_RETRY_TEXT
 
     @pytest.mark.asyncio
@@ -56,7 +71,7 @@ class TestVoiceService:
             db_session, user_id, "networking_event"
         )
         events = []
-        async for event in voice_service.converse(db_session, user_id, session.id, b"fake audio"):
+        async for event in voice_service.converse(db_session, user_id, session.id, _wav_bytes()):
             events.append(event)
         assert len(events) >= 2
         assert events[0][0] == "transcription"

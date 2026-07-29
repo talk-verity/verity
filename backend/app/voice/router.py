@@ -23,7 +23,8 @@ def transcribe(
     service: VoiceService = Depends(get_voice_service),
 ):
     audio_data = file.file.read()
-    text = service.transcribe(audio_data)
+    fmt = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else None
+    text = service.transcribe(audio_data, fmt)
     return {"text": text}
 
 
@@ -50,11 +51,12 @@ async def converse(
     service: VoiceService = Depends(get_voice_service),
 ):
     audio_data = await file.read()
+    fmt = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else None
 
     sid = session_id or service.get_or_create_session(db, current_user.id)
 
     async def event_stream():
-        async for event_type, data in service.converse(db, current_user.id, sid, audio_data):
+        async for event_type, data in service.converse(db, current_user.id, sid, audio_data, source_format=fmt):
             if event_type == "audio":
                 import base64
                 payload = json.dumps({"type": "audio", "data": base64.b64encode(data).decode()})

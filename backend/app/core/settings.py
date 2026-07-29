@@ -33,12 +33,13 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     STT_PROVIDER: str = "mock"
-    WHISPER_MODEL_SIZE: str = "base"
-    WHISPER_MODEL_DIR: str = ""
     GROQ_STT_MODEL: str = "whisper-large-v3-turbo"
+    CANARY_QWEN_MODEL: str = "nvidia/canary-qwen-2.5b"
 
     TTS_PROVIDER: str = "mock"
     TTS_VOICE: str = "en-US-JennyNeural"
+    VIBEVOICE_SPEAKER: str = "en-Carter_man"
+    VIBEVOICE_MODEL: str = "microsoft/VibeVoice-Realtime-0.5B"
 
     @property
     def clerk_jwks_url(self) -> str:

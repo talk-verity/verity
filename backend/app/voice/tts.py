@@ -35,4 +35,7 @@ class MockTTSService(TTSService):
 def get_tts_service() -> TTSService:
     if settings.TTS_PROVIDER == "edge":
         return EdgeTTSService(voice=settings.TTS_VOICE)
+    if settings.TTS_PROVIDER == "vibevoice":
+        from app.voice.tts_vibevoice import VibeVoiceTTSService
+        return VibeVoiceTTSService(speaker=settings.VIBEVOICE_SPEAKER)
     return MockTTSService()

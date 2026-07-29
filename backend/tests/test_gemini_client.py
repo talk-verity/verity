@@ -35,6 +35,6 @@ class TestMockAIService:
 
     def test_extract_context(self):
         ai = MockAIService()
-        prompt = "Context: You're at a crowded industry mixer.\nGoal: impress"
+        prompt = "THE USER'S SITUATION\nYou're at a crowded industry mixer.\nGoal: impress"
         assert ai._extract_context(prompt) == "You're at a crowded industry mixer."
         assert ai._extract_context("no context") == ""

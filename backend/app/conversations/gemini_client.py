@@ -205,5 +205,9 @@ class MockAIService(AIService):
         return ""
 
     def _extract_context(self, prompt: str) -> str:
-        m = re.search(r"Context: (.+)", prompt)
-        return m.group(1) if m else ""
+        lines = prompt.split("\n")
+        for i, line in enumerate(lines):
+            if line.strip() == "THE USER'S SITUATION":
+                if i + 1 < len(lines):
+                    return lines[i + 1].strip()
+        return ""

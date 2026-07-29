@@ -27,6 +27,36 @@ type SessionData = {
   turns: Turn[];
 };
 
+type ReportContent = {
+  scenario: string;
+  persona: string;
+  overall_score: number;
+  summary: string;
+  metrics: {
+    confidence: number;
+    clarity: number;
+    filler_word_count: number;
+    filler_words: string[];
+    total_turns: number;
+    total_user_words: number;
+    avg_response_length: number;
+  };
+  goal_completion: string;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+};
+
+type ReportData = {
+  id: string;
+  session_id: string;
+  status: string;
+  title: string;
+  content: ReportContent | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export default function Home() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const [healthStatus, setHealthStatus] = useState("Checking...");
@@ -41,6 +71,9 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const [report, setReport] = useState<ReportData | "loading" | null>(null);
+  const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
     fetch(`${ROOT}/health`)
@@ -158,6 +191,12 @@ export default function Home() {
   async function startRecording() {
     if (!session) return;
     try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new AudioContext();
+      }
+      if (audioCtxRef.current.state === "suspended") {
+        await audioCtxRef.current.resume();
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const recorder = new MediaRecorder(stream);
@@ -261,11 +300,17 @@ export default function Home() {
               if (b64 && b64.length > 0) {
                 try {
                   const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-                  const audioBlob = new Blob([binary], { type: "audio/wav" });
-                  const url = URL.createObjectURL(audioBlob);
-                  const audio = new Audio(url);
-                  audio.play().catch(() => {});
-                } catch {}
+                  const ctx = audioCtxRef.current;
+                  if (ctx && ctx.state !== "closed") {
+                    const buffer = await ctx.decodeAudioData(binary.buffer);
+                    const source = ctx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(ctx.destination);
+                    source.start();
+                  }
+                } catch (e) {
+                  console.error("Audio playback failed:", e);
+                }
               }
             }
           }
@@ -277,8 +322,49 @@ export default function Home() {
     setSending(false);
   }
 
+  async function completeConversation() {
+    if (!session || completing) return;
+    setCompleting(true);
+    setReport("loading");
+    const token = await getToken();
+    if (!token) { setCompleting(false); return; }
+    try {
+      const res = await fetch(`${API}/conversations/${session.id}/complete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.report_id) {
+        await pollReport(data.report_id, token);
+      }
+    } catch (e) {
+      console.error("Complete failed:", e);
+      setReport(null);
+    }
+    setCompleting(false);
+  }
+
+  async function pollReport(reportId: string, token: string) {
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`${API}/sessions/${session!.id}/report`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        const data: ReportData = await res.json();
+        if (data.status === "ready") {
+          setReport(data);
+          return;
+        }
+      } catch {}
+    }
+    setReport(null);
+  }
+
   function newConversation() {
     setSession(null);
+    setReport(null);
     localStorage.removeItem("verity_session_id");
   }
 
@@ -300,14 +386,119 @@ export default function Home() {
     );
   }
 
+  if (session && report && typeof report !== "string") {
+    const c = report.content;
+    return (
+      <div className="flex flex-1 flex-col max-w-2xl mx-auto w-full px-4 py-6 overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-medium">Feedback</h2>
+          <button onClick={newConversation} className="text-sm text-zinc-400 hover:text-zinc-600">
+            New conversation
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="text-4xl font-semibold">{c?.overall_score ?? "—"}</div>
+            <div className="text-sm text-zinc-500">overall score</div>
+          </div>
+
+          {c?.summary && (
+            <p className="text-sm leading-relaxed text-zinc-700">{c.summary}</p>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-neutral-50 px-4 py-3">
+              <div className="text-xs text-zinc-400 uppercase tracking-wide">Confidence</div>
+              <div className="text-lg font-medium mt-1">{c?.metrics.confidence ?? "—"}/100</div>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-4 py-3">
+              <div className="text-xs text-zinc-400 uppercase tracking-wide">Clarity</div>
+              <div className="text-lg font-medium mt-1">{c?.metrics.clarity ?? "—"}/100</div>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-4 py-3">
+              <div className="text-xs text-zinc-400 uppercase tracking-wide">Filler words</div>
+              <div className="text-lg font-medium mt-1">{c?.metrics.filler_word_count ?? 0}</div>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-4 py-3">
+              <div className="text-xs text-zinc-400 uppercase tracking-wide">Turns</div>
+              <div className="text-lg font-medium mt-1">{c?.metrics.total_turns ?? 0}</div>
+            </div>
+          </div>
+
+          {c?.goal_completion && (
+            <div>
+              <div className="text-xs text-zinc-400 uppercase tracking-wide mb-1">Goal completion</div>
+              <p className="text-sm text-zinc-700 capitalize">{c.goal_completion}</p>
+            </div>
+          )}
+
+          {c?.strengths && c.strengths.length > 0 && (
+            <div>
+              <div className="text-xs text-zinc-400 uppercase tracking-wide mb-2">Strengths</div>
+              <ul className="space-y-1">
+                {c.strengths.map((s, i) => (
+                  <li key={i} className="text-sm text-zinc-700 flex gap-2">
+                    <span className="text-green-600 shrink-0">+</span>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {c?.weaknesses && c.weaknesses.length > 0 && (
+            <div>
+              <div className="text-xs text-zinc-400 uppercase tracking-wide mb-2">Areas to improve</div>
+              <ul className="space-y-1">
+                {c.weaknesses.map((w, i) => (
+                  <li key={i} className="text-sm text-zinc-700 flex gap-2">
+                    <span className="text-amber-600 shrink-0">→</span>
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {c?.recommendations && c.recommendations.length > 0 && (
+            <div>
+              <div className="text-xs text-zinc-400 uppercase tracking-wide mb-2">Recommendations</div>
+              <ul className="space-y-2">
+                {c.recommendations.map((r, i) => (
+                  <li key={i} className="text-sm text-zinc-700 bg-neutral-50 rounded-xl px-4 py-3 leading-relaxed">
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <button onClick={newConversation} className="w-full bg-neutral-900 text-white rounded-2xl py-3 text-sm font-medium mt-4">
+            Practice another scenario
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (session) {
     return (
       <div className="flex flex-1 flex-col max-w-2xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium">{scenarioMap[session.scenario] || session.scenario}</h2>
-          <button onClick={newConversation} className="text-sm text-zinc-400 hover:text-zinc-600">
-            New conversation
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={completeConversation}
+              disabled={completing || session.turns.length === 0}
+              className="text-sm text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40"
+            >
+              {completing ? "Completing…" : "Complete & get feedback"}
+            </button>
+            <button onClick={newConversation} className="text-sm text-zinc-400 hover:text-zinc-600">
+              New conversation
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3 mb-4">
@@ -327,6 +518,11 @@ export default function Home() {
               </div>
             </div>
           ))}
+          {report === "loading" && (
+            <div className="flex justify-center py-8">
+              <p className="text-sm text-zinc-400 animate-pulse">Generating feedback…</p>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
@@ -336,19 +532,19 @@ export default function Home() {
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
             placeholder="Type your response..."
-            disabled={sending || isRecording}
+            disabled={sending || isRecording || report === "loading"}
             className="flex-1 border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
           />
           <button
             onClick={sendMessage}
-            disabled={!message.trim() || sending || isRecording}
+            disabled={!message.trim() || sending || isRecording || report === "loading"}
             className="bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium disabled:opacity-40"
           >
             Send
           </button>
           <button
             onClick={toggleRecording}
-            disabled={sending}
+            disabled={sending || report === "loading"}
             className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
               isRecording
                 ? "bg-red-600 text-white animate-pulse"
