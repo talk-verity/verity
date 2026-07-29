@@ -93,3 +93,33 @@ def respond(
 ):
     turn = service.respond(db, session_id, current_user.id, body.content)
     return TurnResponse.model_validate(turn)
+
+
+@router.post("/{session_id}/complete", status_code=200)
+def complete_conversation(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    service: ConversationService = Depends(get_conversation_service),
+):
+    session = service.get_session(db, session_id, current_user.id)
+    session.status = "completed"
+    db.commit()
+
+    from app.feedback.service import FeedbackService
+    from app.models.report import Report
+    from app.conversations.scenarios import get_scenario
+
+    scenario = get_scenario(session.scenario) or {}
+    report = Report(
+        user_id=current_user.id,
+        session_id=session.id,
+        title=f"Feedback — {scenario.get('name', 'Conversation')}",
+        status="generating",
+    )
+    db.add(report)
+    db.commit()
+
+    FeedbackService().queue_generation(db, report.id)
+
+    return {"status": "completed", "report_id": report.id}

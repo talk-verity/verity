@@ -36,7 +36,11 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     fetch(`${ROOT}/health`)
@@ -143,6 +147,136 @@ export default function Home() {
     setSending(false);
   }
 
+  async function toggleRecording() {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  }
+
+  async function startRecording() {
+    if (!session) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        await sendVoiceMessage(blob);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Mic access denied:", err);
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }
+
+  async function sendVoiceMessage(blob: Blob) {
+    if (!session) return;
+    setSending(true);
+
+    const token = await getToken();
+    if (!token) { setSending(false); return; }
+
+    const formData = new FormData();
+    formData.append("file", blob, "recording." + (blob.type.includes("webm") ? "webm" : "ogg"));
+    formData.append("session_id", session.id);
+
+    try {
+      const response = await fetch(`${API}/voice/converse`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!response.ok || !response.body) {
+        setSending(false);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            const raw = line.slice(6);
+            if (currentEvent === "transcription") {
+              const text = JSON.parse(raw).data;
+              setSession((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      turns: [
+                        ...prev.turns,
+                        { id: "voice-user-" + Date.now(), speaker: "user", content: text, created_at: new Date().toISOString() },
+                      ],
+                    }
+                  : prev
+              );
+            } else if (currentEvent === "ai_response") {
+              const text = JSON.parse(raw).data;
+              setSession((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      turns: [
+                        ...prev.turns,
+                        { id: "voice-ai-" + Date.now(), speaker: "ai", content: text, created_at: new Date().toISOString() },
+                      ],
+                    }
+                  : prev
+              );
+            } else if (currentEvent === "audio") {
+              const { data: b64 } = JSON.parse(raw);
+              if (b64 && b64.length > 0) {
+                try {
+                  const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+                  const audioBlob = new Blob([binary], { type: "audio/wav" });
+                  const url = URL.createObjectURL(audioBlob);
+                  const audio = new Audio(url);
+                  audio.play().catch(() => {});
+                } catch {}
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Voice converse failed:", err);
+    }
+    setSending(false);
+  }
+
   function newConversation() {
     setSession(null);
     localStorage.removeItem("verity_session_id");
@@ -202,15 +336,31 @@ export default function Home() {
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
             placeholder="Type your response..."
-            disabled={sending}
+            disabled={sending || isRecording}
             className="flex-1 border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
           />
           <button
             onClick={sendMessage}
-            disabled={!message.trim() || sending}
+            disabled={!message.trim() || sending || isRecording}
             className="bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium disabled:opacity-40"
           >
             Send
+          </button>
+          <button
+            onClick={toggleRecording}
+            disabled={sending}
+            className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
+              isRecording
+                ? "bg-red-600 text-white animate-pulse"
+                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 disabled:opacity-40"
+            }`}
+            title={isRecording ? "Stop recording" : "Record voice"}
+          >
+            {isRecording ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            )}
           </button>
         </div>
       </div>

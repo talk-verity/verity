@@ -14,7 +14,8 @@ class Report(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="generating")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
