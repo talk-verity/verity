@@ -35,6 +35,14 @@ class TestAnalyzer:
         assert "um" in result["filler_words"]
         assert "like" in result["filler_words"]
 
+    def test_analyze_filler_words_expanded(self, analyzer):
+        user_turns = ["Hmm, you know, sort of like I mean honestly I think we should ship it, right?"]
+        ai_turns = ["Go on."]
+        result = analyzer.analyze("networking_event", user_turns, ai_turns)
+        assert result["filler_word_count"] >= 6
+        for word in ("hmm", "you know", "sort of", "i mean", "honestly", "like"):
+            assert word in result["filler_words"]
+
     def test_analyze_strengths_detected(self, analyzer):
         user_turns = ["I built a scalable API that reduced latency by 40%."]
         ai_turns = ["Tell me more."]

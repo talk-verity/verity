@@ -1,0 +1,103 @@
+export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+export const ROOT = API.replace(/\/api\/v1\/?$/, "");
+
+export type Scenario = {
+  id: string;
+  name: string;
+  description: string;
+  difficulty: string;
+};
+
+export type ScenarioDetail = Scenario & {
+  persona: {
+    name: string;
+    role: string;
+    company: string;
+    personality: string;
+  };
+  goal: string;
+  context: string;
+  opening_line: string;
+  tips: string[];
+};
+
+export type Turn = {
+  id: string;
+  speaker: string;
+  content: string;
+  created_at: string;
+};
+
+export type SessionData = {
+  id: string;
+  scenario: string;
+  status: string;
+  turns: Turn[];
+};
+
+export type TranscriptExample = {
+  type: "strength" | "weakness";
+  label: string;
+  quote: string;
+};
+
+export type ReportContent = {
+  scenario: string;
+  persona: string;
+  overall_score: number;
+  summary: string;
+  metrics: {
+    confidence: number;
+    clarity: number;
+    filler_word_count: number;
+    filler_words: string[];
+    total_turns: number;
+    total_user_words: number;
+    avg_response_length: number;
+  };
+  goal_completion: string;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+  transcript_examples?: TranscriptExample[];
+  references?: { source: string; snippet: string }[];
+  suggested_responses?: { weakness?: string; response: string }[];
+};
+
+export type ReportData = {
+  id: string;
+  session_id: string | null;
+  status: string;
+  title: string;
+  content: ReportContent | null;
+  storage_url?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export const SESSION_KEY = "verity_session_id";
+
+export async function authedFetch(getToken: () => Promise<string | null>, path: string, init?: RequestInit) {
+  const token = await getToken();
+  if (!token) {
+    throw new Error("Not authenticated");
+  }
+  const res = await fetch(`${API}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...init?.headers,
+    },
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}

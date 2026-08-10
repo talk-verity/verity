@@ -3,3 +3,8 @@
 __pycache__/
 node_modules/
 .next/
+
+# Local ML model assets (downloaded, not committed)
+backend/app/voice/parakeet_assets/
+backend/app/voice/vibevoice_assets/model/
+backend/vendor/

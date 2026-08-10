@@ -1,6 +1,7 @@
-import { ClerkProvider, SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Nav from "@/components/Nav";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Verity",
-  description: "Verity application",
+  description: "Practice professional conversations with AI coaching",
 };
 
 export default function RootLayout({
@@ -30,15 +31,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ClerkProvider>
-          <nav className="flex items-center justify-end gap-4 p-4">
-            <Show when="signed-out">
-              <SignInButton />
-              <SignUpButton />
-            </Show>
-            <Show when="signed-in">
-              <UserButton />
-            </Show>
-          </nav>
+          <Nav />
           {children}
         </ClerkProvider>
       </body>

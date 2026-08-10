@@ -6,9 +6,11 @@ from app.conversations.scenarios import get_scenario
 logger = logging.getLogger(__name__)
 
 _FILLER_WORDS = {
-    "um", "uh", "ah", "er", "like", "you know", "actually", "basically",
-    "literally", "honestly", "i mean", "sort of", "kind of", "you see",
-    "well", "so", "right", "okay", "just",
+    "um", "umm", "uh", "uhh", "uhm", "ah", "ahh", "er", "err", "eh", "hmm", "mmm",
+    "mhm", "mm", "like", "you know", "you know what i mean", "i mean", "actually",
+    "basically", "literally", "honestly", "sort of", "kind of", "kinda", "sorta",
+    "you see", "well", "so", "right", "okay", "ok", "just", "i guess", "i think",
+    "to be honest", "at the end of the day",
 }
 
 _HEDGING_WORDS = {
@@ -46,6 +48,7 @@ class Analyzer:
         analysis.update(self._analyze_filler_words(user_turns))
         analysis.update(self._analyze_strengths(user_turns))
         analysis.update(self._analyze_weaknesses(user_turns))
+        analysis.update(self._analyze_transcript_examples(user_turns))
         analysis.update(self._calculate_confidence(user_turns))
         analysis.update(self._calculate_clarity(user_turns))
         analysis.update(self._analyze_interruptions(ai_turns, user_turns))
@@ -93,6 +96,32 @@ class Analyzer:
                 if re.search(pattern, lower):
                     weaknesses.add(label)
         return {"weaknesses": sorted(weaknesses)}
+
+    def _analyze_transcript_examples(self, user_turns: list[str]) -> dict:
+        examples = []
+        for turn in user_turns:
+            lower = turn.lower()
+            for pattern, label in _STRENGTH_PATTERNS:
+                if re.search(pattern, lower):
+                    examples.append({
+                        "type": "strength",
+                        "label": label,
+                        "quote": self._truncate(turn),
+                    })
+                    break
+            for pattern, label in _WEAKNESS_PATTERNS:
+                if re.search(pattern, lower):
+                    examples.append({
+                        "type": "weakness",
+                        "label": label,
+                        "quote": self._truncate(turn),
+                    })
+                    break
+        return {"transcript_examples": examples[:8]}
+
+    def _truncate(self, text: str, limit: int = 200) -> str:
+        text = " ".join(text.split())
+        return text if len(text) <= limit else text[: limit - 3] + "..."
 
     def _calculate_confidence(self, user_turns: list[str]) -> dict:
         if not user_turns:

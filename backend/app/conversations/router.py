@@ -12,6 +12,7 @@ from app.conversations.schemas import (
 )
 from app.conversations.scenarios import get_scenario, list_scenarios
 from app.conversations.service import ConversationService
+from app.feedback.advisor import ResearchAdvisor
 from app.models.user import User
 from database import get_db
 
@@ -33,7 +34,17 @@ def get_scenario_detail(scenario_id: str):
     if not scenario:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
-    return scenario
+    result = dict(scenario)
+    try:
+        from app.feedback.advisor import ResearchAdvisor
+        tips = ResearchAdvisor().scenario_tips(scenario_id)
+        if tips:
+            result["tips"] = tips
+    except Exception as e:
+        from app.core.settings import settings
+        import logging
+        logging.getLogger(__name__).warning("Research tips unavailable for %s: %s", scenario_id, e)
+    return result
 
 
 @router.post("", response_model=ConversationResponse, status_code=201)
@@ -120,6 +131,6 @@ def complete_conversation(
     db.add(report)
     db.commit()
 
-    FeedbackService().queue_generation(db, report.id)
+    FeedbackService(advisor=ResearchAdvisor()).queue_generation(db, report.id)
 
     return {"status": "completed", "report_id": report.id}

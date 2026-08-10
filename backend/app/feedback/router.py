@@ -27,7 +27,7 @@ def get_report(
 
     base = {"session_id": session_id, "status": report.status}
 
-    if report.status == "ready":
+    if report.status in ("ready", "render_failed"):
         import json
         content = json.loads(report.content) if report.content else None
         return ReportResponse(

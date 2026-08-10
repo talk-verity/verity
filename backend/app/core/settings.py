@@ -35,11 +35,32 @@ class Settings(BaseSettings):
     STT_PROVIDER: str = "mock"
     GROQ_STT_MODEL: str = "whisper-large-v3-turbo"
     CANARY_QWEN_MODEL: str = "nvidia/canary-qwen-2.5b"
+    PARAKEET_MODEL_DIR: str = ""
+    PARAKEET_NUM_THREADS: int = 4
 
     TTS_PROVIDER: str = "mock"
     TTS_VOICE: str = "en-US-JennyNeural"
     VIBEVOICE_SPEAKER: str = "en-Carter_man"
-    VIBEVOICE_MODEL: str = "microsoft/VibeVoice-Realtime-0.5B"
+    VIBEVOICE_MODEL: str = ""
+
+    PINECONE_API_KEY: str = ""
+    PINECONE_ENVIRONMENT: str = "us-east-1"
+
+    EMBEDDING_PROVIDER: str = "local"
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_DIMENSION: int = 384
+
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = "verity-reports"
+    R2_PUBLIC_BASE_URL: str = ""
+
+    @property
+    def r2_endpoint_url(self) -> str:
+        if self.R2_ACCOUNT_ID:
+            return f"https://{self.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+        return ""
 
     @property
     def clerk_jwks_url(self) -> str:

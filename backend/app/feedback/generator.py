@@ -7,13 +7,26 @@ logger = logging.getLogger(__name__)
 
 
 class FeedbackGenerator:
-    def generate(self, analysis: dict, scenario_name: str, persona_name: str) -> str:
+    def generate(
+        self,
+        analysis: dict,
+        scenario_name: str,
+        persona_name: str,
+        rag_context: str = "",
+        suggestions: dict | None = None,
+    ) -> str:
         score = analysis.get("overall_score", 0)
         strengths = analysis.get("strengths", [])
         weaknesses = analysis.get("weaknesses", [])
         goal = analysis.get("goal_completion", "unknown")
 
         recommendations = self._build_recommendations(analysis)
+        suggested_responses = None
+        if suggestions:
+            if suggestions.get("recommendations"):
+                recommendations = suggestions["recommendations"]
+            if suggestions.get("suggested_responses"):
+                suggested_responses = suggestions["suggested_responses"]
 
         report = {
             "scenario": scenario_name,
@@ -34,7 +47,33 @@ class FeedbackGenerator:
             "weaknesses": weaknesses,
             "recommendations": recommendations,
         }
+
+        if analysis.get("transcript_examples"):
+            report["transcript_examples"] = analysis["transcript_examples"]
+
+        if rag_context:
+            references = self._extract_references(rag_context)
+            report["references"] = references
+
+        if suggested_responses:
+            report["suggested_responses"] = suggested_responses
+
         return json.dumps(report, indent=2)
+
+    def _extract_references(self, rag_context: str) -> list[dict]:
+        refs = []
+        for block in rag_context.split("\n\n---\n\n"):
+            lines = block.strip().split("\n")
+            if not lines:
+                continue
+            source = "unknown"
+            text = block
+            for line in lines:
+                if line.startswith("[Source:"):
+                    source = line.replace("[Source:", "").replace("]", "").strip()
+                    text = "\n".join(lines[1:])
+            refs.append({"source": source, "snippet": text[:200]})
+        return refs
 
     def _build_summary(self, score: float, goal: str) -> str:
         if score >= 80:

@@ -43,3 +43,4 @@ class ScenarioDetailResponse(ScenarioResponse):
     goal: str
     context: str
     opening_line: str
+    tips: list[str] = []
