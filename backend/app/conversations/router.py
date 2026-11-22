@@ -29,7 +29,7 @@ def get_scenarios():
 
 
 @router.get("/scenarios/{scenario_id}", response_model=ScenarioDetailResponse)
-def get_scenario_detail(scenario_id: str):
+def get_scenario_detail(scenario_id: str, current_user: User = Depends(get_current_user)):
     scenario = get_scenario(scenario_id)
     if not scenario:
         from fastapi import HTTPException, status
@@ -102,7 +102,7 @@ def respond(
     db: Session = Depends(get_db),
     service: ConversationService = Depends(get_conversation_service),
 ):
-    turn = service.respond(db, session_id, current_user.id, body.content)
+    turn = service.respond(db, session_id, current_user.id, body.content, str(body.request_id))
     return TurnResponse.model_validate(turn)
 
 
@@ -113,24 +113,26 @@ def complete_conversation(
     db: Session = Depends(get_db),
     service: ConversationService = Depends(get_conversation_service),
 ):
-    session = service.get_session(db, session_id, current_user.id)
-    session.status = "completed"
-    db.commit()
-
-    from app.feedback.service import FeedbackService
+    from app.models.session import Session as SessionModel
     from app.models.report import Report
-    from app.conversations.scenarios import get_scenario
-
+    from app.models.turn import Turn
+    session = (db.query(SessionModel).filter(SessionModel.id == session_id,
+               SessionModel.user_id == current_user.id).populate_existing().with_for_update().first())
+    from fastapi import HTTPException
+    if not session:
+        raise HTTPException(404, "Session not found")
+    report = db.query(Report).filter(Report.session_id == session.id).order_by(Report.created_at).first()
+    if report:
+        return {"status": "completed", "report_id": report.id}
+    if not db.query(Turn).filter(Turn.session_id == session.id, Turn.speaker == "user").first():
+        raise HTTPException(422, "Add a response before requesting feedback")
+    session.status = "completed"
     scenario = get_scenario(session.scenario) or {}
-    report = Report(
-        user_id=current_user.id,
-        session_id=session.id,
-        title=f"Feedback — {scenario.get('name', 'Conversation')}",
-        status="generating",
-    )
+    report = Report(user_id=current_user.id, session_id=session.id,
+                    title=f"Feedback — {scenario.get('name', 'Conversation')}", status="generating")
     db.add(report)
+    db.flush()
+    from app.feedback.service import FeedbackService
+    FeedbackService.queue_generation(db, report.id)
     db.commit()
-
-    FeedbackService(advisor=ResearchAdvisor()).queue_generation(db, report.id)
-
     return {"status": "completed", "report_id": report.id}

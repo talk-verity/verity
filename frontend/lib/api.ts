@@ -44,11 +44,14 @@ export type TranscriptExample = {
 export type ReportContent = {
   scenario: string;
   persona: string;
-  overall_score: number;
+  overall_score: number | null;
+  assessment_note?: string;
+  assessment_method?: string;
+  rubric_observations?: { criterion: string; observed: boolean; quote: string | null }[];
   summary: string;
   metrics: {
-    confidence: number;
-    clarity: number;
+    confidence: number | null;
+    clarity: number | null;
     filler_word_count: number;
     filler_words: string[];
     total_turns: number;
@@ -77,6 +80,10 @@ export type ReportData = {
 
 export const SESSION_KEY = "verity_session_id";
 
+export class APIError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 export async function authedFetch(getToken: () => Promise<string | null>, path: string, init?: RequestInit) {
   const token = await getToken();
   if (!token) {
@@ -96,7 +103,7 @@ export async function authedFetch(getToken: () => Promise<string | null>, path: 
       const body = await res.json();
       detail = body.detail || detail;
     } catch {}
-    throw new Error(detail);
+    throw new APIError(typeof detail === "string" ? detail : "Invalid request", res.status);
   }
   if (res.status === 204) return null;
   return res.json();

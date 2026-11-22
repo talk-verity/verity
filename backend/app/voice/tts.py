@@ -23,7 +23,7 @@ class EdgeTTSService(TTSService):
             if chunk["type"] == "audio":
                 audio.write(chunk["data"])
         result = audio.getvalue()
-        logger.info("Synthesized %d bytes for: %.100s", len(result), text)
+        logger.info("Synthesized %d bytes", len(result))
         return result
 
 
@@ -32,10 +32,34 @@ class MockTTSService(TTSService):
         return text.encode("utf-8")
 
 
+_tts_service = None
+
+
+def _get_tts_service() -> TTSService:
+    global _tts_service
+    if _tts_service is None:
+        if settings.TTS_PROVIDER == "edge":
+            _tts_service = EdgeTTSService(voice=settings.TTS_VOICE)
+        elif settings.TTS_PROVIDER == "kokoro":
+            from app.voice.tts_kokoro import KokoroTTSService
+            _tts_service = KokoroTTSService()
+        elif settings.TTS_PROVIDER == "vibevoice":
+            from app.voice.tts_vibevoice import VibeVoiceTTSService
+            _tts_service = VibeVoiceTTSService(
+                model_path=settings.VIBEVOICE_MODEL,
+                speaker=settings.VIBEVOICE_SPEAKER,
+            )
+        elif settings.TTS_PROVIDER == "mock" and settings.DEMO_MODE:
+            _tts_service = MockTTSService()
+        else:
+            from fastapi import HTTPException
+            raise HTTPException(503, "Speech provider is not configured")
+    return _tts_service
+
+
+from threading import Lock
+_service_lock = Lock()
+
 def get_tts_service() -> TTSService:
-    if settings.TTS_PROVIDER == "edge":
-        return EdgeTTSService(voice=settings.TTS_VOICE)
-    if settings.TTS_PROVIDER == "vibevoice":
-        from app.voice.tts_vibevoice import VibeVoiceTTSService
-        return VibeVoiceTTSService(speaker=settings.VIBEVOICE_SPEAKER)
-    return MockTTSService()
+    with _service_lock:
+        return _get_tts_service()

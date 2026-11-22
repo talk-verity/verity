@@ -8,24 +8,29 @@ export default function ReportView({ content }: { content: ReportContent }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="text-4xl font-semibold">
-          {content.overall_score ?? "—"}
-          <span className="text-base text-neutral-400 font-normal">/100</span>
-        </div>
-        <div className="text-sm text-neutral-500">overall score</div>
-      </div>
+      <p className="text-sm text-neutral-600">
+        {content.assessment_note || "This legacy report used unvalidated heuristics. Numerical scores are hidden."}
+      </p>
+      {content.rubric_observations && (
+        <Section label="Practice prompts">
+          <ul className="space-y-2 text-sm">
+            {content.rubric_observations.map(item => <li key={item.criterion}>
+              {item.criterion}: {item.observed ? "text cue found — review its meaning in context" : "no text cue found — review your transcript"}
+            </li>)}
+          </ul>
+        </Section>
+      )}
 
-      {content.summary && (
+      {content.assessment_method === "transcript_observations_v1" && content.summary && (
         <p className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           {content.summary}
         </p>
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <MetricCard label="Confidence" value={`${metrics.confidence ?? "—"}/100`} />
-        <MetricCard label="Clarity" value={`${metrics.clarity ?? "—"}/100`} />
-        <MetricCard label="Filler words" value={metrics.filler_word_count ?? 0} />
+        <MetricCard label="Words" value={metrics.total_user_words ?? 0} />
+        <MetricCard label="Words per response" value={metrics.avg_response_length ?? 0} />
+        <MetricCard label="Filler sounds in transcript" value={metrics.filler_word_count ?? 0} />
         <MetricCard label="Turns" value={metrics.total_turns ?? 0} />
       </div>
 
@@ -118,7 +123,7 @@ export default function ReportView({ content }: { content: ReportContent }) {
       )}
 
       {(content.suggested_responses?.length ?? 0) > 0 && (
-        <Section label="Research-backed responses">
+        <Section label="Practice suggestions">
           <div className="space-y-2">
             {content.suggested_responses!.map((s, i) => (
               <div key={i} className="rounded-xl bg-neutral-50 dark:bg-neutral-900 px-4 py-3">

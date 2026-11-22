@@ -33,28 +33,26 @@ class TestAnalyzer:
         result = analyzer.analyze("networking_event", user_turns, ai_turns)
         assert result["filler_word_count"] > 0
         assert "um" in result["filler_words"]
-        assert "like" in result["filler_words"]
+        assert "like" not in result["filler_words"]
 
     def test_analyze_filler_words_expanded(self, analyzer):
         user_turns = ["Hmm, you know, sort of like I mean honestly I think we should ship it, right?"]
         ai_turns = ["Go on."]
         result = analyzer.analyze("networking_event", user_turns, ai_turns)
-        assert result["filler_word_count"] >= 6
-        for word in ("hmm", "you know", "sort of", "i mean", "honestly", "like"):
-            assert word in result["filler_words"]
+        assert result["filler_word_count"] == 0  # context-dependent words are not automatically mistakes
 
     def test_analyze_strengths_detected(self, analyzer):
         user_turns = ["I built a scalable API that reduced latency by 40%."]
         ai_turns = ["Tell me more."]
         result = analyzer.analyze("job_interview", user_turns, ai_turns)
-        assert len(result["strengths"]) > 0
-        assert any("action verbs" in s for s in result["strengths"])
+        assert result["strengths"] == []
+        assert any(o["criterion"] == "Action described" and o["observed"] for o in result["rubric_observations"])
 
     def test_analyze_goal_completion(self, analyzer):
         user_turns = ["Present a compelling case for promotion to Senior Engineer with specific achievements."]
         ai_turns = ["Go on."]
         result = analyzer.analyze("promotion_discussion", user_turns, ai_turns)
-        assert result["goal_completion"] in ("highly addressed", "partially addressed")
+        assert result["goal_completion"] == "Not assessed automatically"
 
 
 class TestFeedbackGenerator:
@@ -153,7 +151,8 @@ class TestFeedbackService:
         assert data["metrics"]["total_turns"] == 2
         assert data["metrics"]["total_user_words"] > 0
         assert "networking" in data["scenario"].lower()
-        assert len(data["strengths"]) > 0 or len(data["weaknesses"]) > 0
+        assert data["rubric_observations"]
+        assert data["assessment_method"] == "transcript_observations_v1"
 
     def test_get_report_nonexistent(self, db_session, service):
         report = service.get_report(db_session, "no-session", "no-user")

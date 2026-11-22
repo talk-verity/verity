@@ -32,6 +32,9 @@ class FeedbackGenerator:
             "scenario": scenario_name,
             "persona": persona_name,
             "overall_score": score,
+            "assessment_method": analysis.get("assessment_method", "legacy_heuristic"),
+            "assessment_note": analysis.get("assessment_note", "Legacy heuristic feedback; not a validated assessment."),
+            "rubric_observations": analysis.get("rubric_observations", []),
             "summary": self._build_summary(score, goal),
             "metrics": {
                 "confidence": analysis.get("confidence_score", 0),
@@ -75,25 +78,16 @@ class FeedbackGenerator:
             refs.append({"source": source, "snippet": text[:200]})
         return refs
 
-    def _build_summary(self, score: float, goal: str) -> str:
-        if score >= 80:
-            return "Strong performance. You communicated effectively and addressed the scenario goals well."
-        if score >= 60:
-            return "Decent performance with room for improvement in clarity and confidence."
-        return "Needs improvement. Focus on reducing filler words and speaking more directly."
+    def _build_summary(self, score, goal: str) -> str:
+        return "Review the transcript observations below, then choose one skill to practice again. Goal achievement and communication quality require review in context."
 
     def _build_recommendations(self, analysis: dict) -> list[str]:
         recs = []
+        for item in analysis.get("rubric_observations", []):
+            if not item["observed"]:
+                recs.append(f"Review '{item['criterion']}' in your transcript. No matching text cue was found; this does not prove it was absent.")
         if analysis.get("filler_word_count", 0) > 3:
-            recs.append(f"Reduce filler words like '{', '.join(analysis.get('filler_words', [])[:3])}' — pause instead of filling silence.")
-        if analysis.get("confidence_score", 100) < 70:
-            recs.append("Use fewer hedging words (maybe, I think, I guess). State your points directly.")
-        if analysis.get("clarity_score", 100) < 70:
-            recs.append("Aim for shorter, more structured sentences. Lead with your main point.")
-        if "over-apologizes" in analysis.get("weaknesses", []):
-            recs.append("Avoid over-apologizing — replace 'sorry' with 'thank you for your patience'.")
-        if not analysis.get("strengths", []):
-            recs.append("Ask more questions and provide specific examples to strengthen engagement.")
-        if len(recs) < 2:
-            recs.append("Keep practicing — each conversation builds your communication skills.")
-        return recs
+            recs.append("Listen back for repeated filler sounds and consider a pause where it helps your meaning.")
+        recs.extend(["Compare your answer with the scenario goal and identify one concrete next step.",
+                     "Practice again, focusing on one specific change rather than a numerical score."])
+        return recs[:5]

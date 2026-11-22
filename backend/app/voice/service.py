@@ -1,20 +1,20 @@
 import logging
 import os
 import tempfile
-import uuid
+from time import perf_counter
 
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
-from app.conversations.gemini_client import AIService, GeminiClient
-from app.conversations.prompt_builder import PromptBuilder
-from app.conversations.scenarios import get_scenario
 from app.conversations.service import ConversationService
 from app.models.session import Session as SessionModel
-from app.models.turn import Turn
 from app.voice.stt import STTService, get_stt_service
 from app.voice.tts import TTSService, get_tts_service
 
 logger = logging.getLogger(__name__)
+from threading import Lock
+_tts_lock = Lock()
+_stt_lock = Lock()
 
 
 STT_RETRY_TEXT = "Sorry, I didn't catch that. Could you repeat it?"
@@ -27,45 +27,23 @@ class VoiceService:
         tts: TTSService | None = None,
         conversation_service: ConversationService | None = None,
     ):
-        self.stt = stt or get_stt_service()
-        self.tts = tts or get_tts_service()
+        self.stt = stt
+        self.tts = tts
         self.conversation = conversation_service or ConversationService()
 
     def transcribe(self, audio_data: bytes, source_format: str | None = None) -> str:
-        is_wav = audio_data[:4] == b"RIFF" and audio_data[8:12] == b"WAVE"
-        if is_wav or source_format == "wav":
-            suffix = ".wav"
-        else:
-            suffix = f".{source_format}" if source_format else ".webm"
-
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-            f.write(audio_data)
-            audio_path = f.name
-
-        if is_wav or source_format == "wav":
-            audio_path_for_stt = audio_path
-            wav_path = None
-        else:
-            wav_path = audio_path.rsplit(".", 1)[0] + ".wav"
-            import subprocess
-            result = subprocess.run(
-                ["ffmpeg", "-y", "-i", audio_path, "-ar", "16000", "-ac", "1",
-                 "-sample_fmt", "s16", wav_path],
-                capture_output=True, timeout=30,
-            )
-            if result.returncode != 0:
-                logger.error("ffmpeg conversion failed: %s", result.stderr.decode())
-                raise RuntimeError("ffmpeg conversion failed")
-            audio_path_for_stt = wav_path
+        audio_path_for_stt, wav_path = self._prepare_audio(audio_data, source_format)
 
         try:
-            text = self.stt.transcribe(audio_path_for_stt)
+            with _stt_lock:
+                text = (self.stt or get_stt_service()).transcribe(audio_path_for_stt)
             return text
         except Exception as e:
-            logger.error("STT failed: %s", e)
-            return STT_RETRY_TEXT
+            from fastapi import HTTPException
+            logger.exception("STT failed")
+            raise HTTPException(503, "Transcription unavailable. Please retry.") from e
         finally:
-            paths = [audio_path]
+            paths = [audio_path_for_stt]
             if wav_path:
                 paths.append(wav_path)
             for p in paths:
@@ -74,8 +52,66 @@ class VoiceService:
                 except OSError:
                     pass
 
+    def _prepare_audio(self, audio_data: bytes, source_format: str | None) -> tuple[str, str | None]:
+        from app.core.settings import settings
+        from fastapi import HTTPException
+        import subprocess
+        import wave
+        if not audio_data or len(audio_data) > settings.MAX_AUDIO_BYTES:
+            raise HTTPException(413, "Audio upload exceeds the allowed size")
+        if audio_data[:4] == b"RIFF" and audio_data[8:12] == b"WAVE":
+            container = "wav"
+        elif audio_data[:4] == b"OggS":
+            container = "ogg"
+        elif audio_data[:4] == b"\x1a\x45\xdf\xa3":
+            container = "matroska"
+        elif audio_data[4:8] == b"ftyp":
+            container = "mov"
+        else:
+            raise HTTPException(422, "Unsupported recording format")
+        source = tempfile.NamedTemporaryFile(suffix=".audio", delete=False)
+        audio_path = source.name
+        wav_path = audio_path + ".wav"
+        try:
+            with source:
+                source.write(audio_data)
+            # Decode every format, including WAV, to a bounded PCM representation.
+            # FFmpeg detects the container; user-supplied filenames are never trusted.
+            result = subprocess.run([
+                self._ffmpeg_binary(), "-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
+                "-f", container, "-i", audio_path,
+                "-t", str(settings.MAX_AUDIO_SECONDS + 1), "-ar", "16000", "-ac", "1",
+                "-sample_fmt", "s16", wav_path,
+            ], capture_output=True, timeout=30)
+            if result.returncode:
+                raise HTTPException(422, "Audio could not be decoded")
+            with wave.open(wav_path) as wav:
+                duration = wav.getnframes() / wav.getframerate()
+            if duration > settings.MAX_AUDIO_SECONDS:
+                raise HTTPException(413, "Recording exceeds the duration limit")
+            return wav_path, audio_path
+        except BaseException:
+            for path in (audio_path, wav_path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            raise
+
+    @staticmethod
+    def _ffmpeg_binary():
+        from app.core.settings import settings
+        if settings.FFMPEG_BINARY == "bundled":
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        return settings.FFMPEG_BINARY
+
     async def synthesize(self, text: str) -> bytes:
-        return await self.tts.synthesize(text)
+        import asyncio
+        def run():
+            with _tts_lock:
+                return asyncio.run((self.tts or get_tts_service()).synthesize(text))
+        return await run_in_threadpool(run)
 
     async def converse(
         self,
@@ -84,20 +120,70 @@ class VoiceService:
         session_id: str,
         audio_data: bytes,
         source_format: str | None = None,
+        request_id: str | None = None,
     ):
-        text = self.transcribe(audio_data, source_format)
-        yield "transcription", text
+        def recognize():
+            path, original = self._prepare_audio(audio_data, source_format)
+            try:
+                with _stt_lock:
+                    text = (self.stt or get_stt_service()).transcribe(path)
+                return text, self._assess_quality(path, text)
+            finally:
+                for item in (path, original):
+                    if item:
+                        try:
+                            os.unlink(item)
+                        except OSError:
+                            pass
+        started = perf_counter()
+        try:
+            text, quality = await run_in_threadpool(recognize)
+        except Exception as exc:
+            from fastapi import HTTPException
+            if isinstance(exc, HTTPException):
+                raise
+            logger.exception("Transcription failed")
+            raise HTTPException(503, "Transcription unavailable. Please retry.") from exc
+        if not text or text == STT_RETRY_TEXT:
+            from fastapi import HTTPException
+            raise HTTPException(422, "No speech recognized. Please try again.")
 
-        if text == STT_RETRY_TEXT:
-            ai_text = text
-        else:
-            turn = self.conversation.respond(db, session_id, user_id, text)
-            ai_text = turn.content
+        stt_finished = perf_counter()
+        yield "transcription", text
+        yield "mic_quality", quality
+
+        turn = await run_in_threadpool(self.conversation.respond, db, session_id, user_id, text, request_id)
+        ai_text = turn.content
+        llm_finished = perf_counter()
 
         yield "ai_response", ai_text
 
-        audio = await self.synthesize(ai_text)
-        yield "audio", audio
+        yield "timing", {"stt_ms": round((stt_finished - started) * 1000),
+                         "response_ms": round((llm_finished - stt_finished) * 1000)}
+
+        speech_started = perf_counter()
+        try:
+            audio = await self.synthesize(ai_text)
+            yield "timing", {"tts_ms": round((perf_counter() - speech_started) * 1000)}
+            if audio:
+                yield "audio", audio
+            else:
+                logger.warning("TTS produced empty audio")
+                yield "warning", "Your response was saved, but speech is unavailable."
+        except Exception as e:
+            logger.error("TTS failed for response (text delivered, audio skipped): %s", e)
+            yield "warning", "Your response was saved, but speech is unavailable."
+
+    def _assess_quality(self, wav_path: str, text: str) -> dict:
+        try:
+            from app.voice.audio_quality import assess_audio_quality
+            quality = assess_audio_quality(wav_path)
+        except Exception as e:
+            logger.error("Mic quality assessment failed: %s", e)
+            quality = {"score": 0, "quality": "unknown", "rms_db": None,
+                       "peak_db": None, "silence_ratio": None, "clip_ratio": None}
+        quality["recognized"] = text not in (STT_RETRY_TEXT, "", None)
+        return quality
 
     def get_or_create_session(self, db: Session, user_id: str) -> str:
         active = (

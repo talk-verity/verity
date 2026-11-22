@@ -1,6 +1,5 @@
 import json
 import logging
-import threading
 
 from sqlalchemy.orm import Session
 
@@ -42,8 +41,12 @@ class FeedbackService:
             scenario = get_scenario(scenario_id) or {}
             persona = scenario.get("persona", {})
 
-            transcript = self._build_transcript(user_turns, ai_turns)
-            rag_context = self.rag.retrieve_context(scenario_id, transcript)
+            transcript = "\n".join(f"{'User' if t.speaker == 'user' else 'AI'}: {t.content}" for t in turns)
+            try:
+                rag_context = self.rag.retrieve_context(scenario_id, transcript)
+            except Exception:
+                logger.exception("Optional research retrieval unavailable")
+                rag_context = ""
 
             analysis = self.analyzer.analyze(scenario_id, user_turns, ai_turns)
 
@@ -74,29 +77,24 @@ class FeedbackService:
                 logger.info("Report %s generated and stored successfully", report_id)
         except Exception as e:
             logger.error("Report generation failed for %s: %s", report_id, e)
-            report.status = "failed"
-            db.commit()
+            db.rollback()
+            report = db.get(Report, report_id)
+            if report:
+                report.status = "failed"
+                db.commit()
 
-    def _build_transcript(self, user_turns: list[str], ai_turns: list[str]) -> str:
-        lines = []
-        for i in range(max(len(user_turns), len(ai_turns))):
-            if i < len(user_turns):
-                lines.append(f"User: {user_turns[i]}")
-            if i < len(ai_turns):
-                lines.append(f"AI: {ai_turns[i]}")
-        return "\n".join(lines)
-
-    def queue_generation(self, db: Session, report_id: str):
-        thread = threading.Thread(target=self._run_generation, args=(report_id,), daemon=True)
-        thread.start()
-
-    def _run_generation(self, report_id: str):
-        from database import SessionLocal
-        db = SessionLocal()
-        try:
-            self.generate_report(db, report_id)
-        finally:
-            db.close()
+    @staticmethod
+    def queue_generation(db: Session, report_id: str):
+        """Persist with the caller's transaction; the separate worker executes it."""
+        from app.models.report_job import ReportJob
+        from datetime import datetime, timezone
+        job = db.get(ReportJob, report_id)
+        if job is None:
+            db.add(ReportJob(report_id=report_id))
+        else:
+            job.status = "pending"
+            job.attempts = 0
+            job.available_at = datetime.now(timezone.utc)
 
     def get_report(self, db: Session, session_id: str, user_id: str) -> Report | None:
         return (

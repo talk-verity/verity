@@ -1,4 +1,8 @@
 from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
+from starlette.concurrency import run_in_threadpool
+import logging
+import uuid
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -9,7 +13,19 @@ from app.feedback.router import router as feedback_router
 from app.reports.router import router as reports_router
 from app.voice.router import router as voice_router
 
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
+@asynccontextmanager
+async def lifespan(app):
+    if settings.STT_PROVIDER == "parakeet":
+        from app.voice.stt import get_stt_service
+        await run_in_threadpool(get_stt_service().warmup)
+    if settings.TTS_PROVIDER == "kokoro":
+        from app.voice.tts import get_tts_service
+        await run_in_threadpool(get_tts_service().warmup)
+    yield
+
+app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
+from app.core.body_limit import BodyLimitMiddleware
+app.add_middleware(BodyLimitMiddleware, max_bytes=settings.MAX_AUDIO_BYTES + 65536)
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,35 +42,23 @@ app.include_router(feedback_router, prefix=settings.API_V1_PREFIX)
 app.include_router(reports_router, prefix=settings.API_V1_PREFIX)
 
 
-def _warmup() -> None:
-    try:
-        from app.voice.stt import get_stt_service
-        stt = get_stt_service()
-        if hasattr(stt, "warmup"):
-            stt.warmup()
-    except Exception as e:
-        print(f"[startup] STT warmup skipped: {e}")
-
-    try:
-        from app.voice.tts import get_tts_service
-        tts = get_tts_service()
-        if hasattr(tts, "warmup"):
-            tts.warmup()
-    except Exception as e:
-        print(f"[startup] TTS warmup skipped: {e}")
-
-
-@app.on_event("startup")
-def warmup_on_startup() -> None:
-    import threading
-    threading.Thread(target=_warmup, daemon=True).start()
-
-
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    from database import check_db_connection
+    db_ready = check_db_connection()
+    configured = bool(settings.DEMO_MODE or (settings.GROQ_API_KEY or settings.GEMINI_API_KEY))
+    ready = db_ready and configured
+    return JSONResponse(status_code=200 if ready else 503, content={
+        "status": "ready" if ready else "unavailable", "database": db_ready,
+        "conversation_configured": configured, "demo_mode": settings.DEMO_MODE})
+
+@app.get("/live")
+def live():
+    return {"status": "alive"}
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    request_id = str(uuid.uuid4())
+    logging.getLogger(__name__).error("Unhandled request error %s", request_id, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error", "request_id": request_id})

@@ -1,0 +1,14 @@
+.env
+.env.*
+.venv*
+vendor/
+storage/
+tests/
+__pycache__/
+app/voice/parakeet_assets/
+app/voice/vibevoice_assets/
+app/voice/kokoro_assets/
+.pytest_cache/
+app/embeddings/data/
+# Vercel uses the lightweight pyproject.toml dependencies.
+requirements.txt

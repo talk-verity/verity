@@ -19,15 +19,15 @@ class ReportResponse(ReportStatusResponse):
 
 
 class FeedbackAnalysis(BaseModel):
-    overall_score: float = 0.0
+    overall_score: float | None = None
     strengths: list[str] = []
     weaknesses: list[str] = []
     recommendations: list[str] = []
-    confidence_score: float = 0.0
-    clarity_score: float = 0.0
+    confidence_score: float | None = None
+    clarity_score: float | None = None
     filler_word_count: int = 0
     filler_words: list[str] = []
-    interruption_count: int = 0
+    interruption_count: int | None = None
     goal_completion: str = ""
     total_turns: int = 0
     total_user_words: int = 0

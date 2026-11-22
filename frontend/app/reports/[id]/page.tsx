@@ -27,17 +27,40 @@ export default function ReportDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
-  const fetchReport = useCallback(() => {
-    if (!isSignedIn) return;
-    authedFetch(getToken, `/reports/${params.id}`)
-      .then((data) => setReport(data as ReportData))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+  const fetchReport = useCallback((signal?: AbortSignal) => {
+    if (!isSignedIn) return Promise.resolve();
+    return authedFetch(getToken, `/reports/${params.id}`, { signal })
+      .then(async data => {
+        if (signal?.aborted) return;
+        setReport(data);
+        setError(null);
+        if (data.status === "generating") {
+          await authedFetch(getToken, `/reports/${params.id}/process`, { method: "POST", signal });
+          const updated = await authedFetch(getToken, `/reports/${params.id}`, { signal });
+          if (!signal?.aborted) setReport(updated);
+        }
+      })
+      .catch(err => { if (!signal?.aborted) setError(err instanceof Error ? err.message : "Could not load feedback"); })
+      .finally(() => { if (!signal?.aborted) setLoading(false); });
   }, [isSignedIn, getToken, params.id]);
 
   useEffect(() => {
-    fetchReport();
+    const controller = new AbortController();
+    void fetchReport(controller.signal);
+    return () => controller.abort();
   }, [fetchReport]);
+
+  useEffect(() => {
+    if (report?.status !== "generating") return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      await fetchReport(controller.signal);
+      if (!controller.signal.aborted) timer = setTimeout(poll, 3000);
+    }
+    timer = setTimeout(poll, 3000);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [report?.status, fetchReport]);
 
   async function handleRetry() {
     setRetrying(true);
@@ -45,7 +68,7 @@ export default function ReportDetailPage() {
     try {
       await authedFetch(getToken, `/reports/${params.id}/retry`, { method: "POST" });
       setLoading(true);
-      fetchReport();
+      await fetchReport();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Retry failed");
     }
@@ -112,7 +135,7 @@ export default function ReportDetailPage() {
                 <div className="mx-auto w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
                 <p className="mt-4 text-sm text-blue-800 font-medium">Generating your report…</p>
                 <p className="mt-1 text-xs text-blue-600">
-                  This usually takes under a minute. Refresh to check again.
+                  Your feedback is queued. This page updates automatically.
                 </p>
               </div>
             )}
@@ -137,12 +160,9 @@ export default function ReportDetailPage() {
                 <p className="text-sm text-red-800 font-medium">
                   This report failed to generate.
                 </p>
-                <Link
-                  href="/scenarios"
-                  className="inline-block mt-4 bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium"
-                >
-                  Try another conversation
-                </Link>
+                <button onClick={handleRetry} disabled={retrying} className="mt-4 underline">
+                  {retrying ? "Retrying…" : "Retry feedback for this conversation"}
+                </button>
               </div>
             )}
 

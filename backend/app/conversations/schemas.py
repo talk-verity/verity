@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from uuid import UUID
 
 
 class ConversationCreate(BaseModel):
@@ -28,7 +29,15 @@ class ConversationResponse(BaseModel):
 
 
 class TurnCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=8000)
+    request_id: UUID
+
+    @field_validator("content")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("Message must not be blank")
+        return value.strip()
 
 
 class ScenarioResponse(BaseModel):

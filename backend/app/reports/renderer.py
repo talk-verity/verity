@@ -20,7 +20,10 @@ class ReportRenderer:
             references = content.get("references", []) or []
 
             sections = []
-            sections.append(self._score_section(score, summary, goal))
+            sections.append('<h1>Overall Summary</h1><p>' + html.escape(content.get("assessment_note") or "Legacy heuristic report: numerical scores are not validated and are hidden.") + '</p>')
+            observations = content.get("rubric_observations", [])
+            if observations:
+                sections.append('<h2>Practice prompts</h2><ul>' + ''.join('<li>' + html.escape(o["criterion"]) + ': ' + ('text cue found' if o["observed"] else 'review your transcript') + '</li>' for o in observations) + '</ul>')
             sections.append(self._metric_section(metrics))
             sections.append(self._strengths_section(strengths, examples))
             sections.append(self._improvements_section(weaknesses, examples))
@@ -84,8 +87,6 @@ class ReportRenderer:
 
     def _metric_section(self, metrics) -> str:
         items = {
-            "Confidence": metrics.get("confidence"),
-            "Clarity": metrics.get("clarity"),
             "Filler words": metrics.get("filler_word_count"),
             "Turns": metrics.get("total_turns"),
             "Avg response length": metrics.get("avg_response_length"),
@@ -136,7 +137,7 @@ class ReportRenderer:
                 f'<div class="quote"><span class="tag weakness">{"For " + weakness if weakness else "Suggested response"}</span>'
                 f'{response}{source_line}</div>'
             )
-        return "<h2>Research-Backed Responses</h2>\n" + "\n".join(blocks)
+        return "<h2>Practice suggestions</h2>\n" + "\n".join(blocks)
 
     def _transcript_examples_section(self, examples) -> str:
         if not examples:

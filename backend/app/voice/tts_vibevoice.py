@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import copy
+import threading
 import torch
 
 from app.core.settings import settings
@@ -9,20 +10,25 @@ from app.core.settings import settings
 logger = logging.getLogger(__name__)
 
 _VOICES_DIR = os.path.join(os.path.dirname(__file__), "vibevoice_assets", "voices", "streaming_model")
+_MODEL_DIR = os.path.join(os.path.dirname(__file__), "vibevoice_assets", "model")
 
 
 class VibeVoiceTTSService:
-    def __init__(self, model_path: str = "microsoft/VibeVoice-Realtime-0.5B", speaker: str = "en-Carter_man"):
-        self.model_path = model_path
+    def __init__(self, model_path: str = "", speaker: str = "en-Carter_man"):
+        self.model_path = model_path or _MODEL_DIR
         self.speaker = speaker
         self._processor = None
         self._model = None
         self._voice_prompt = None
         self._device = None
+        self._lock = threading.Lock()
 
     def _get_device(self):
         if self._device is None:
-            if torch.cuda.is_available():
+            override = settings.VIBEVOICE_DEVICE.strip().lower()
+            if override in ("cuda", "mps", "cpu"):
+                self._device = override
+            elif torch.cuda.is_available():
                 self._device = "cuda"
             elif torch.backends.mps.is_available():
                 self._device = "mps"
@@ -30,28 +36,37 @@ class VibeVoiceTTSService:
                 self._device = "cpu"
         return self._device
 
+    def warmup(self):
+        self._get_processor()
+        self._get_model()
+        self._get_voice_prompt()
+
     def _get_processor(self):
         if self._processor is None:
-            from vibevoice.processor.vibevoice_streaming_processor import VibeVoiceStreamingProcessor
-            self._processor = VibeVoiceStreamingProcessor.from_pretrained(self.model_path)
-            logger.info("VibeVoice processor loaded")
+            with self._lock:
+                if self._processor is None:
+                    from vibevoice.processor.vibevoice_streaming_processor import VibeVoiceStreamingProcessor
+                    self._processor = VibeVoiceStreamingProcessor.from_pretrained(self.model_path)
+                    logger.info("VibeVoice processor loaded")
         return self._processor
 
     def _get_model(self):
         if self._model is None:
-            from vibevoice.modular.modeling_vibevoice_streaming_inference import VibeVoiceStreamingForConditionalGenerationInference
-            device = self._get_device()
-            dtype = torch.float32 if device in ("mps", "cpu") else torch.bfloat16
-            attn = "sdpa"
-            self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
-                self.model_path,
-                torch_dtype=dtype,
-                attn_implementation=attn,
-            )
-            self._model.to(device)
-            self._model.eval()
-            self._model.set_ddpm_inference_steps(num_steps=5)
-            logger.info("VibeVoice model loaded on %s", device)
+            with self._lock:
+                if self._model is None:
+                    from vibevoice.modular.modeling_vibevoice_streaming_inference import VibeVoiceStreamingForConditionalGenerationInference
+                    device = self._get_device()
+                    dtype = torch.float32 if device in ("mps", "cpu") else torch.bfloat16
+                    attn = "sdpa"
+                    self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                        self.model_path,
+                        torch_dtype=dtype,
+                        attn_implementation=attn,
+                    )
+                    self._model.to(device)
+                    self._model.eval()
+                    self._model.set_ddpm_inference_steps(num_steps=5)
+                    logger.info("VibeVoice model loaded on %s", device)
         return self._model
 
     def _get_voice_prompt(self):
@@ -113,8 +128,8 @@ class VibeVoiceTTSService:
             import soundfile as sf
             sf.write(buf, audio, 24000, format="WAV")
             result = buf.getvalue()
-            logger.info("VibeVoice TTS: %d bytes for: %.100s", len(result), text)
+            logger.info("VibeVoice TTS: %d bytes", len(result))
             return result
 
-        logger.warning("VibeVoice generated no audio for: %.100s", text)
+        logger.warning("VibeVoice generated no audio")
         return b""
