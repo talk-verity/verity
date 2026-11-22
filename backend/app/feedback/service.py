@@ -36,7 +36,16 @@ class FeedbackService:
             user_turns = [t.content for t in turns if t.speaker == "user"]
             ai_turns = [t.content for t in turns if t.speaker == "ai"]
 
-            scenario_id = report.session.scenario if report.session else ""
+            session = report.session
+            scenario_id = session.scenario if session else ""
+            timed_out = (session.status == "timed_out") if session else False
+            if session and not timed_out:
+                from datetime import timezone
+                created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+                rep_time = report.created_at if report.created_at.tzinfo else report.created_at.replace(tzinfo=timezone.utc)
+                if (rep_time - created_at).total_seconds() >= 300:
+                    timed_out = True
+
             from app.conversations.scenarios import get_scenario
             scenario = get_scenario(scenario_id) or {}
             persona = scenario.get("persona", {})
@@ -48,7 +57,7 @@ class FeedbackService:
                 logger.exception("Optional research retrieval unavailable")
                 rag_context = ""
 
-            analysis = self.analyzer.analyze(scenario_id, user_turns, ai_turns)
+            analysis = self.analyzer.analyze(scenario_id, user_turns, ai_turns, timed_out=timed_out)
 
             suggestions = None
             if self.advisor is not None:
@@ -63,10 +72,14 @@ class FeedbackService:
                 persona.get("name", ""),
                 rag_context=rag_context,
                 suggestions=suggestions,
+                timed_out=timed_out,
             )
 
             report.content = content
-            report.title = f"Feedback — {scenario.get('name', 'Conversation')}"
+            report_title = f"Feedback — {scenario.get('name', 'Conversation')}"
+            if timed_out:
+                report_title += " (Timed Out)"
+            report.title = report_title
             db.commit()
 
             from app.reports.service import ReportService

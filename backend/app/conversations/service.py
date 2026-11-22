@@ -84,6 +84,13 @@ class ConversationService:
                     return previous
             if session.status != "active":
                 raise HTTPException(400, "Session is not active")
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+            if (now - created_at).total_seconds() >= 300:
+                session.status = "timed_out"
+                db.commit()
+                raise HTTPException(400, "Session time limit expired (5 minutes). Please complete the conversation to view feedback.")
             if not message.strip() or len(message) > 8000:
                 raise HTTPException(422, "Message must contain 1–8000 characters")
             if self.ai_service is None:

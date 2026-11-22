@@ -23,9 +23,14 @@ class ConversationResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    time_limit_seconds: int = 300
     turns: list[TurnResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class ConversationCompleteRequest(BaseModel):
+    reason: str | None = None
 
 
 class TurnCreate(BaseModel):

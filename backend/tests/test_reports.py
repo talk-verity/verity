@@ -193,3 +193,11 @@ class TestReportService:
         assert ok is True
         assert db_session.query(Report).filter(Report.id == report.id).first() is None
         assert service.download_html(db_session, report.id, report.user_id) is None
+
+    def test_render_timed_out_banner(self):
+        content = dict(SAMPLE_CONTENT)
+        content["timed_out"] = True
+        renderer = ReportRenderer()
+        html = renderer.render_html(content)
+        assert "Time Expired" in html
+        assert "5:00 Limit" in html

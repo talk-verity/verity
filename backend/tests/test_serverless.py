@@ -51,3 +51,36 @@ def test_request_processing_authorizes_and_targets_one_job(db_session, monkeypat
         assert db_session.get(ReportJob, other_id).attempts == 0
     finally:
         app.dependency_overrides.clear()
+
+
+def test_complete_conversation_timed_out_allows_zero_user_turns(db_session):
+    from app.models.session import Session as SessionModel
+    from app.models.turn import Turn
+
+    uid = "test-to-user"
+    user = User(id=uid, clerk_id=f"clerk-{uid}", email=f"{uid}@test.com")
+    db_session.add(user)
+    db_session.flush()
+
+    session = SessionModel(id="to-session-1", user_id=uid, scenario="networking_event", status="active")
+    db_session.add(session)
+    db_session.add(Turn(session_id=session.id, speaker="ai", content="Hi, I'm Jordan."))
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, uid)
+    try:
+        with TestClient(app) as client:
+            # 1. Normal completion with 0 user turns fails with 422
+            res = client.post(f"/api/v1/conversations/{session.id}/complete")
+            assert res.status_code == 422
+
+            # 2. Timeout completion with 0 user turns succeeds
+            res_to = client.post(f"/api/v1/conversations/{session.id}/complete", json={"reason": "time_expired"})
+            assert res_to.status_code == 200
+            data = res_to.json()
+            assert data["status"] == "timed_out"
+            assert data["timed_out"] is True
+            assert data["report_id"] is not None
+    finally:
+        app.dependency_overrides.clear()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,14 @@ import {
   type ScenarioDetail,
   type SessionData,
 } from "@/lib/api";
+
+const SCENARIO_TIME_LIMIT_SECONDS = 300;
+
+function formatTime(seconds: number) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 export default function ConversationPage() {
   const { isSignedIn, getToken, userId } = useAuth();
@@ -37,6 +45,8 @@ export default function ConversationPage() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const timedOutHandled = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const requestRef = useRef<AbortController | null>(null);
@@ -184,8 +194,11 @@ export default function ConversationPage() {
     }
   }
 
-  async function completeConversation() {
-    if (!session || completing || busyRef.current || isRecording || voice.starting) return;
+  const completeConversation = useCallback(async (reason?: string) => {
+    if (!session || completing) return;
+    if (isRecording) {
+      voice.stop();
+    }
     busyRef.current = true;
     setCompleting(true);
     setError(null);
@@ -193,7 +206,9 @@ export default function ConversationPage() {
       const controller = new AbortController();
       requestRef.current = controller;
       const data = await authedFetch(getToken, `/conversations/${session.id}/complete`, {
-        method: "POST", signal: controller.signal,
+        method: "POST",
+        signal: controller.signal,
+        body: reason ? JSON.stringify({ reason }) : undefined,
       });
       if (!mounted.current) return;
       if (data.report_id) {
@@ -207,11 +222,35 @@ export default function ConversationPage() {
       }
       busyRef.current = false;
     }
-  }
+  }, [session, completing, isRecording, voice, getToken, userId, router]);
+
+  const completeRef = useRef(completeConversation);
+  completeRef.current = completeConversation;
+
+  useEffect(() => {
+    if (!session || session.status !== "active") return;
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session]);
+
+  const startMs = session?.created_at ? new Date(session.created_at).getTime() : now;
+  const elapsed = Math.floor((now - startMs) / 1000);
+  const timeLeft = session ? Math.max(0, SCENARIO_TIME_LIMIT_SECONDS - elapsed) : SCENARIO_TIME_LIMIT_SECONDS;
+
+  useEffect(() => {
+    if (!session || session.status !== "active" || timeLeft > 0) return;
+    if (timedOutHandled.current) return;
+    timedOutHandled.current = true;
+    void completeRef.current("time_expired");
+  }, [session, timeLeft]);
 
   function newConversation() {
     if (busyRef.current || isRecording || voice.starting || completing) return;
     pendingText.current = null; pendingVoice.current = null; setCanRetryVoice(false);
+    timedOutHandled.current = false;
+    setNow(Date.now());
     setSession(null);
     setMessage("");
     setError(null);
@@ -254,16 +293,33 @@ export default function ConversationPage() {
           <div className="flex flex-1 flex-col-reverse md:flex-row gap-6 min-h-0">
             <div className="flex-1 min-w-0 flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-medium">
-                  {scenarioNames[session.scenario] || session.scenario}
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-medium">
+                    {scenarioNames[session.scenario] || session.scenario}
+                  </h2>
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-colors ${
+                      timeLeft <= 30
+                        ? "bg-red-50 text-red-700 border-red-300 animate-pulse dark:bg-red-950/60 dark:text-red-300 dark:border-red-800"
+                        : timeLeft <= 60
+                        ? "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800"
+                        : "bg-neutral-50 text-neutral-700 border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700"
+                    }`}
+                    title="5-minute scenario limit"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                    </svg>
+                    <span>{timeLeft === 0 ? "0:00" : formatTime(timeLeft)}</span>
+                  </div>
+                </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={completeConversation}
+                    onClick={() => completeConversation()}
                     disabled={completing || sending || isRecording || voice.starting || !session.turns.some(t => t.speaker === "user")}
                     className="text-sm text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40"
                   >
-                    {completing ? "Completing…" : "Complete & get feedback"}
+                    {completing ? (timeLeft <= 0 ? "Time's up! Generating…" : "Completing…") : "Complete & get feedback"}
                   </button>
                   <button
                     onClick={newConversation}
@@ -317,6 +373,15 @@ export default function ConversationPage() {
                 <div ref={chatEndRef} />
               </div>
 
+              {timeLeft <= 0 && (
+                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs sm:text-sm text-amber-800 flex items-center gap-2 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  </svg>
+                  <span>5 minutes are up! Automatically completing conversation and generating your feedback…</span>
+                </div>
+              )}
+
               <div className="flex gap-2 pb-6">
                 <input
                   aria-label="Your response"
@@ -324,20 +389,20 @@ export default function ConversationPage() {
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                  placeholder="Type your response..."
-                  disabled={sending || isRecording || voice.starting || completing}
+                  placeholder={timeLeft <= 0 ? "Time has expired. Generating feedback…" : "Type your response..."}
+                  disabled={sending || isRecording || voice.starting || completing || timeLeft <= 0}
                   className="flex-1 border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={!message.trim() || sending || isRecording || voice.starting || completing}
+                  disabled={!message.trim() || sending || isRecording || voice.starting || completing || timeLeft <= 0}
                   className="bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium disabled:opacity-40"
                 >
                   Send
                 </button>
                 <button
                   onClick={toggleRecording}
-                  disabled={sending || completing || voice.starting}
+                  disabled={sending || completing || voice.starting || timeLeft <= 0}
                   className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
                     isRecording
                       ? "bg-red-600 text-white animate-pulse"

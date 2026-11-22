@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.conversations.schemas import (
+    ConversationCompleteRequest,
     ConversationCreate,
     ConversationResponse,
     ScenarioDetailResponse,
@@ -109,30 +110,45 @@ def respond(
 @router.post("/{session_id}/complete", status_code=200)
 def complete_conversation(
     session_id: str,
+    body: ConversationCompleteRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    from datetime import datetime, timezone
     from app.models.session import Session as SessionModel
     from app.models.report import Report
     from app.models.turn import Turn
+    from fastapi import HTTPException
+
     session = (db.query(SessionModel).filter(SessionModel.id == session_id,
                SessionModel.user_id == current_user.id).populate_existing().with_for_update().first())
-    from fastapi import HTTPException
     if not session:
         raise HTTPException(404, "Session not found")
     report = db.query(Report).filter(Report.session_id == session.id).order_by(Report.created_at).first()
     if report:
-        return {"status": "completed", "report_id": report.id}
-    if not db.query(Turn).filter(Turn.session_id == session.id, Turn.speaker == "user").first():
+        return {"status": session.status, "report_id": report.id, "timed_out": session.status == "timed_out"}
+
+    now = datetime.now(timezone.utc)
+    created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+    elapsed_seconds = (now - created_at).total_seconds()
+    is_timed_out = bool(body and body.reason == "time_expired") or elapsed_seconds >= 300
+
+    has_user_turn = db.query(Turn).filter(Turn.session_id == session.id, Turn.speaker == "user").first() is not None
+    if not is_timed_out and not has_user_turn:
         raise HTTPException(422, "Add a response before requesting feedback")
-    session.status = "completed"
+
+    session.status = "timed_out" if is_timed_out else "completed"
     scenario = get_scenario(session.scenario) or {}
+    report_title = f"Feedback — {scenario.get('name', 'Conversation')}"
+    if is_timed_out:
+        report_title += " (Timed Out)"
+
     report = Report(user_id=current_user.id, session_id=session.id,
-                    title=f"Feedback — {scenario.get('name', 'Conversation')}", status="generating")
+                    title=report_title, status="generating")
     db.add(report)
     db.flush()
     from app.feedback.service import FeedbackService
     FeedbackService.queue_generation(db, report.id)
     db.commit()
-    return {"status": "completed", "report_id": report.id}
+    return {"status": session.status, "report_id": report.id, "timed_out": is_timed_out}

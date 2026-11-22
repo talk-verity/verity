@@ -8,6 +8,19 @@ export default function ReportView({ content }: { content: ReportContent }) {
 
   return (
     <div className="space-y-6">
+      {content.timed_out && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex items-center gap-2 font-semibold text-red-800 dark:text-red-400">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+            </svg>
+            Time Expired (5-Minute Limit)
+          </div>
+          <p className="mt-1 text-xs sm:text-sm text-red-700 dark:text-red-300">
+            The 5-minute time limit expired before the conversation objective was completed. Review your transcript cues and recommendations on pacing below.
+          </p>
+        </div>
+      )}
       <p className="text-sm text-neutral-600">
         {content.assessment_note || "This legacy report used unvalidated heuristics. Numerical scores are hidden."}
       </p>
@@ -54,7 +67,7 @@ export default function ReportView({ content }: { content: ReportContent }) {
 
       {content.goal_completion && (
         <Section label="Goal completion">
-          <p className="text-sm text-neutral-700 capitalize dark:text-neutral-300">
+          <p className={`text-sm ${content.timed_out ? "text-red-700 dark:text-red-400 font-medium" : "text-neutral-700 dark:text-neutral-300 capitalize"}`}>
             {content.goal_completion}
           </p>
         </Section>

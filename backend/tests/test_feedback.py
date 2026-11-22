@@ -53,6 +53,18 @@ class TestAnalyzer:
         ai_turns = ["Go on."]
         result = analyzer.analyze("promotion_discussion", user_turns, ai_turns)
         assert result["goal_completion"] == "Not assessed automatically"
+        assert result["timed_out"] is False
+
+    def test_analyze_timed_out(self, analyzer):
+        user_turns = ["Hello, I'd like to talk about the project."]
+        ai_turns = ["Sure."]
+        result = analyzer.analyze("workplace_conflict", user_turns, ai_turns, timed_out=True)
+        assert result["timed_out"] is True
+        assert "Objective not completed" in result["goal_completion"]
+        assert "5-minute" in result["goal_completion"]
+        assert "Time limit reached" in result["assessment_note"]
+        assert len(result["weaknesses"]) > 0
+        assert "Time management" in result["weaknesses"][0]
 
 
 class TestFeedbackGenerator:
@@ -84,6 +96,28 @@ class TestFeedbackGenerator:
         assert len(data["recommendations"]) >= 2
         assert data["metrics"]["confidence"] == 70.0
         assert data["metrics"]["clarity"] == 80.0
+        assert data["timed_out"] is False
+
+    def test_generate_report_timed_out(self, generator):
+        analysis = {
+            "overall_score": None,
+            "strengths": [],
+            "weaknesses": ["Time management: 5 minutes expired"],
+            "goal_completion": "Objective not completed — 5-minute time limit expired",
+            "timed_out": True,
+            "filler_word_count": 0,
+            "filler_words": [],
+            "total_turns": 1,
+            "total_user_words": 15,
+            "avg_response_length": 15.0,
+            "rubric_observations": [],
+        }
+        content = generator.generate(analysis, "Job Interview", "Alex Rivera", timed_out=True)
+        data = json.loads(content)
+        assert data["timed_out"] is True
+        assert data["time_limit_seconds"] == 300
+        assert "5-minute time limit expired" in data["summary"]
+        assert any("pacing" in r.lower() for r in data["recommendations"])
 
 
 class TestFeedbackService:
@@ -153,6 +187,44 @@ class TestFeedbackService:
         assert "networking" in data["scenario"].lower()
         assert data["rubric_observations"]
         assert data["assessment_method"] == "transcript_observations_v1"
+        assert data["timed_out"] is False
+
+    def test_generate_report_timed_out_session(self, db_session, service):
+        from app.models.user import User
+        user = User(id="fb-user-timed-out", clerk_id="fb-clerk-to", email="fb-to@test.com")
+        db_session.add(user)
+        db_session.flush()
+
+        session = SessionModel(
+            user_id="fb-user-timed-out",
+            scenario="performance_review",
+            status="timed_out",
+        )
+        db_session.add(session)
+        db_session.flush()
+
+        # Session timed out before any user turns were submitted
+        db_session.add(Turn(session_id=session.id, speaker="ai", content="Let's start with how you think the quarter went."))
+
+        report = Report(
+            user_id="fb-user-timed-out",
+            session_id=session.id,
+            title="Feedback — Performance Review (Timed Out)",
+            status="generating",
+        )
+        db_session.add(report)
+        db_session.commit()
+
+        service.generate_report(db_session, report.id)
+
+        updated = db_session.query(Report).filter(Report.id == report.id).first()
+        assert updated.status == "ready"
+        assert "(Timed Out)" in updated.title
+        data = json.loads(updated.content)
+        assert data["timed_out"] is True
+        assert data["metrics"]["total_turns"] == 0
+        assert "Objective not completed — 5-minute time limit expired" == data["goal_completion"]
+        assert "5-minute time limit expired" in data["summary"]
 
     def test_get_report_nonexistent(self, db_session, service):
         report = service.get_report(db_session, "no-session", "no-user")

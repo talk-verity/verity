@@ -20,6 +20,15 @@ class ReportRenderer:
             references = content.get("references", []) or []
 
             sections = []
+            if content.get("timed_out"):
+                sections.append(
+                    '<div class="card timeout-card" style="background:#fef2f2; border:1px solid #fecaca; border-left:4px solid #ef4444; margin-bottom:16px;">'
+                    '<strong style="color:#991b1b;">Time Expired (5:00 Limit)</strong>'
+                    '<p style="margin:4px 0 0; color:#b91c1c; font-size:.9rem;">'
+                    'The 5-minute time limit expired before the conversation objective was completed. '
+                    'Review your transcript observations below to see where pacing can be improved to achieve your goals in time.'
+                    '</p></div>'
+                )
             sections.append('<h1>Overall Summary</h1><p>' + html.escape(content.get("assessment_note") or "Legacy heuristic report: numerical scores are not validated and are hidden.") + '</p>')
             observations = content.get("rubric_observations", [])
             if observations:

@@ -64,6 +64,13 @@ async def converse(file: UploadFile, session_id: str = Form(...), request_id: UU
     session = await run_in_threadpool(service.conversation.get_session, db, session_id, current_user.id)
     if session.status != "active":
         raise HTTPException(409, "Session is not active")
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+    if (now - created_at).total_seconds() >= 300:
+        session.status = "timed_out"
+        db.commit()
+        raise HTTPException(400, "Session time limit expired (5 minutes). Please complete the conversation to view feedback.")
     user_id = current_user.id
     acquire()
     try:

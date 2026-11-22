@@ -32,6 +32,9 @@ export type SessionData = {
   id: string;
   scenario: string;
   status: string;
+  created_at?: string;
+  updated_at?: string;
+  time_limit_seconds?: number;
   turns: Turn[];
 };
 
@@ -47,6 +50,8 @@ export type ReportContent = {
   overall_score: number | null;
   assessment_note?: string;
   assessment_method?: string;
+  timed_out?: boolean;
+  time_limit_seconds?: number;
   rubric_observations?: { criterion: string; observed: boolean; quote: string | null }[];
   summary: string;
   metrics: {
