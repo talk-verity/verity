@@ -1,3 +1,5 @@
+import { getReferralCode } from "@/lib/referral";
+
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 export const ROOT = API.replace(/\/api\/v1\/?$/, "");
 
@@ -94,11 +96,13 @@ export async function authedFetch(getToken: () => Promise<string | null>, path: 
   if (!token) {
     throw new Error("Not authenticated");
   }
+  const referral = getReferralCode();
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      ...(referral ? { "X-Verity-Referral": referral } : {}),
       ...init?.headers,
     },
   });

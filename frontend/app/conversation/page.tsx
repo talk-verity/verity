@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SSEParser } from "@/lib/sse";
+import { parseApiTimestamp } from "@/lib/time";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import AuthGate from "@/components/AuthGate";
 import ContextPanel from "@/components/ContextPanel";
@@ -235,7 +236,7 @@ export default function ConversationPage() {
     return () => clearInterval(interval);
   }, [session]);
 
-  const startMs = session?.created_at ? new Date(session.created_at).getTime() : now;
+  const startMs = session?.created_at ? parseApiTimestamp(session.created_at) : now;
   const elapsed = Math.floor((now - startMs) / 1000);
   const timeLeft = session ? Math.max(0, SCENARIO_TIME_LIMIT_SECONDS - elapsed) : SCENARIO_TIME_LIMIT_SECONDS;
 

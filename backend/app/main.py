@@ -1,3 +1,4 @@
+from app.admin.router import router as admin_router
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 from starlette.concurrency import run_in_threadpool
@@ -35,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(conversations_router, prefix=settings.API_V1_PREFIX)
 app.include_router(voice_router, prefix=settings.API_V1_PREFIX)

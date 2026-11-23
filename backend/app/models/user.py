@@ -15,6 +15,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    referral_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
