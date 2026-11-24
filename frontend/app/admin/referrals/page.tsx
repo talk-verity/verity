@@ -35,7 +35,7 @@ export default function ReferralsPage() {
       <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-10">
         <h1 className="text-2xl font-semibold tracking-tight">Partner referrals</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Unique Verity accounts created through each partner link.
+          Unique Delphi accounts created through each partner link.
         </p>
 
         {error && (

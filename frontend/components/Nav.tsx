@@ -1,6 +1,7 @@
 "use client";
 
 import { UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -18,8 +19,14 @@ export default function Nav() {
   return (
     <nav className="flex items-center justify-between px-6 py-3 border-b border-neutral-200 sticky top-0 bg-white/90 backdrop-blur z-10">
       <div className="flex items-center gap-6">
-        <Link href="/" className="font-semibold text-neutral-900 tracking-tight">
-          Verity
+        <Link href="/" aria-label="Delphi home">
+          <Image
+            src="/brand/delphi-logo.svg"
+            alt="Delphi"
+            width={104}
+            height={34}
+            priority
+          />
         </Link>
         <div className="hidden md:flex items-center gap-1">
           {LINKS.map((link) => {

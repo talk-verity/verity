@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
@@ -17,7 +18,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (!isSignedIn) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">Verity</h1>
+        <Image
+          src="/brand/delphi-logo.svg"
+          alt="Delphi"
+          width={188}
+          height={61}
+          priority
+        />
         <p className="mt-3 text-neutral-500">
           Sign in to practice professional conversations and get AI coaching.
         </p>

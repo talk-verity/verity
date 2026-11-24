@@ -66,7 +66,7 @@ def verify_clerk_token(token: str) -> dict:
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
-    referral_code: str | None = Header(default=None, alias="X-Verity-Referral"),
+    referral_code: str | None = Header(default=None, alias="X-Delphi-Referral"),
 ) -> User:
     payload = verify_clerk_token(credentials.credentials)
     clerk_id = payload.get("sub")

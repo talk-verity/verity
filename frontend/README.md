@@ -1,4 +1,4 @@
-# Verity frontend
+# Delphi frontend
 
 See the [project README](../README.md) for setup, configuration, deployment and verification.
 

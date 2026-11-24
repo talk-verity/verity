@@ -85,7 +85,7 @@ export type ReportData = {
   updated_at: string;
 };
 
-export const SESSION_KEY = "verity_session_id";
+export const SESSION_KEY = "delphi_session_id";
 
 export class APIError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -102,7 +102,7 @@ export async function authedFetch(getToken: () => Promise<string | null>, path: 
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      ...(referral ? { "X-Verity-Referral": referral } : {}),
+      ...(referral ? { "X-Delphi-Referral": referral } : {}),
       ...init?.headers,
     },
   });

@@ -1,4 +1,4 @@
-# Verity
+# Delphi
 
 Practice professional conversations, then review transcript observations and research suggestions. Feedback is **not a validated measure of confidence, clarity, or goal achievement**. Numerical heuristic scores are no longer displayed, including on legacy reports.
 
@@ -7,7 +7,7 @@ Practice professional conversations, then review transcript observations and res
 Open Docker Desktop, then run:
 
 ```sh
-cd /Users/pmanj/Desktop/verity
+cd /Users/pmanj/Desktop/delphi
 python3 scripts/dev.py
 ```
 

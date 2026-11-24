@@ -87,7 +87,7 @@ export default function ReportDetailPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${report?.title.replace(/[^a-z0-9]+/gi, "-") || "verity-report"}.html`;
+      a.download = `${report?.title.replace(/[^a-z0-9]+/gi, "-") || "delphi-report"}.html`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {

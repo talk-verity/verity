@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Verity",
+  title: "Delphi",
   description: "Practice professional conversations with AI coaching",
 };
 
