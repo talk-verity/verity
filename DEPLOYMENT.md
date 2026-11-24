@@ -2,10 +2,10 @@
 
 ## Current deployment
 
-- Frontend: https://verity-web-azure.vercel.app
-- API: https://verity-api-roan.vercel.app
+- Frontend: https://delphi-web-azure.vercel.app
+- API: https://delphi-api-roan.vercel.app
 - Vercel workspace: `par-ms-projects`
-- Projects: `verity-web` and `verity-api`
+- Projects: `delphi-web` and `delphi-api`
 - Both local directories are linked for CLI deployments. To deploy reviewed
   changes, run `vercel deploy --prod` from the appropriate directory.
 - These deployments were uploaded directly from the checkout; pushing GitHub
@@ -14,8 +14,8 @@
   Neon URL in the ignored `backend/.env.vercel` file and Vercel's sensitive
   environment variables. Do not commit it.
 
-Use two Vercel Hobby projects from the same repository: `verity-api` with root
-`backend`, and `verity-web` with root `frontend`. Hobby is for personal,
+Use two Vercel Hobby projects from the same repository: `delphi-api` with root
+`backend`, and `delphi-web` with root `frontend`. Hobby is for personal,
 noncommercial use. Use each project's actual assigned URL in all configuration.
 This guide prepares a fresh hosted database; it does not copy local conversations.
 
@@ -48,8 +48,8 @@ reviewed before committing. This preparation does not automatically commit or pu
 
 ## 3. Vercel API
 
-At https://vercel.com/new import `talk-verity/verity`, name the project
-`verity-api` (or another available name), set Root Directory to `backend` and
+At https://vercel.com/new import `talk-delphi/delphi`, name the project
+`delphi-api` (or another available name), set Root Directory to `backend` and
 Framework Preset to FastAPI. Keep default install/build settings. The deployment
 uses pyproject.toml; .vercelignore excludes the large local requirements.txt and
 model assets. Do not configure a build step that runs migrations against the
@@ -71,7 +71,7 @@ continues to protect authenticated API routes.
 
 ## 4. Vercel frontend
 
-Import the same repository again, name the project `verity-web`, select root
+Import the same repository again, name the project `delphi-web`, select root
 `frontend` and Next.js. Use Node 24, `npm ci`, and `npm run build`.
 
 Set Production variables:

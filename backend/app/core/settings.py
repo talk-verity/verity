@@ -10,7 +10,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    PROJECT_NAME: str = "Verity"
+    PROJECT_NAME: str = "Delphi"
     VERSION: str = "0.1.0"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     CLERK_AUDIENCE: str = ""
     CLERK_AUTHORIZED_PARTIES: List[str] = ["http://localhost:3000"]
 
-    DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/verity"
+    DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/delphi"
     SECRET_KEY: str = "change-me-to-a-random-secret-key"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
-    R2_BUCKET_NAME: str = "verity-reports"
+    R2_BUCKET_NAME: str = "delphi-reports"
     R2_PUBLIC_BASE_URL: str = ""
 
     @property

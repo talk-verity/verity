@@ -1,14 +1,14 @@
 services:
   postgres:
     image: postgres:17
-    container_name: verity_db
+    container_name: delphi_db
 
     restart: unless-stopped
 
     environment:
-      POSTGRES_USER: verity
-      POSTGRES_PASSWORD: talkverity
-      POSTGRES_DB: verity
+      POSTGRES_USER: delphi
+      POSTGRES_PASSWORD: talkdelphi
+      POSTGRES_DB: delphi
 
     ports:
       - "5433:5432"

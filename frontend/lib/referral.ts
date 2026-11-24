@@ -1,4 +1,4 @@
-export const REFERRAL_COOKIE = "verity_ref";
+export const REFERRAL_COOKIE = "delphi_ref";
 
 const CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 

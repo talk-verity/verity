@@ -1,10 +1,10 @@
-# Verity Development Guidelines (Karpathy's Rules)
+# Delphi Development Guidelines (Karpathy's Rules)
 
 This repository follows Andrej Karpathy's engineering principles for AI-assisted software development:
 
 ## 1. Think Before Coding
 - **State assumptions explicitly**: Never guess or implement ambiguous requirements blindly.
-- **Truth over fiction**: Do not invent metrics or heuristics. In Verity, feedback must be grounded in observable transcript cues and cited research, not unvalidated numerical scores.
+- **Truth over fiction**: Do not invent metrics or heuristics. In Delphi, feedback must be grounded in observable transcript cues and cited research, not unvalidated numerical scores.
 - **Understand operational bounds**: Respect limits (e.g. 4 MB / 120s voice limits on Vercel, bounded rate limits).
 
 ## 2. Simplicity First
