@@ -1,23 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SSEParser } from "@/lib/sse";
+import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import AuthGate from "@/components/AuthGate";
 import ContextPanel from "@/components/ContextPanel";
 import {
   authedFetch,
+  APIError,
   API,
   SESSION_KEY,
   type Scenario,
   type ScenarioDetail,
   type SessionData,
-  type Turn,
 } from "@/lib/api";
 
+const SCENARIO_TIME_LIMIT_SECONDS = 300;
+
+function formatTime(seconds: number) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 export default function ConversationPage() {
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, getToken, userId } = useAuth();
   const router = useRouter();
   const [session, setSession] = useState<SessionData | null>(null);
   const [scenarioNames, setScenarioNames] = useState<Record<string, string>>({});
@@ -32,308 +42,220 @@ export default function ConversationPage() {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const timedOutHandled = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const interimLastSentRef = useRef(0);
-  const interimInFlightRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const mounted = useRef(false);
+  const busyRef = useRef(false);
+  const pendingText = useRef<{ content: string; id: string } | null>(null);
+  const pendingVoice = useRef<{ blob: Blob; id: string } | null>(null);
+  const [canRetryVoice, setCanRetryVoice] = useState(false);
+  const voice = useVoiceRecorder(blob => { void sendVoiceMessage(blob); }, setError);
+  const { isRecording } = voice;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; requestRef.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn) return;
-    authedFetch(getToken, "/conversations/scenarios")
-      .then((data) => setScenarioNames(Object.fromEntries((data as Scenario[]).map((s) => [s.id, s.name]))))
+    const controller = new AbortController();
+    const signal = controller.signal;
+    authedFetch(getToken, "/conversations/scenarios", { signal })
+      .then(data => { if (!signal.aborted) setScenarioNames(Object.fromEntries((data as Scenario[]).map(s => [s.id, s.name]))); })
       .catch(() => {});
-
-    const storedId = localStorage.getItem(SESSION_KEY);
+    const storedId = localStorage.getItem(`${SESSION_KEY}:${userId}`);
     const load = async () => {
       if (!storedId) return null;
       try {
-        const data = await authedFetch(getToken, `/conversations/${storedId}`);
-        if (data?.id) return data as SessionData;
-      } catch {}
-      localStorage.removeItem(SESSION_KEY);
-      return null;
-    };
-    load()
-      .then((data) => {
-        if (data) {
-          setSession(data);
-          authedFetch(getToken, `/conversations/scenarios/${data.scenario}`)
-            .then((detail) => setScenarioDetail(detail as ScenarioDetail))
-            .catch(() => {});
+        return await authedFetch(getToken, `/conversations/${storedId}`, { signal }) as SessionData;
+      } catch (err) {
+        if (err instanceof APIError && err.status === 404) {
+          localStorage.removeItem(`${SESSION_KEY}:${userId}`);
+          return null;
         }
-      })
-      .finally(() => setLoading(false));
-  }, [isSignedIn, getToken]);
+        throw err;
+      }
+    };
+    load().then(data => {
+      if (signal.aborted) return;
+      setSession(data);
+      if (data) authedFetch(getToken, `/conversations/scenarios/${data.scenario}`, { signal })
+        .then(detail => { if (!signal.aborted) setScenarioDetail(detail); }).catch(() => {});
+    }).catch(err => { if (!signal.aborted) setError(err.message); })
+      .finally(() => { if (!signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [isSignedIn, getToken, userId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.turns]);
 
+  async function refreshSession(id: string, signal?: AbortSignal) {
+    const data = await authedFetch(getToken, `/conversations/${id}`, { signal });
+    if (mounted.current) setSession(data);
+  }
+
   async function sendMessage() {
-    if (!message.trim() || !session || sending || isRecording) return;
+    if (!message.trim() || !session || busyRef.current || isRecording || voice.starting || completing) return;
+    busyRef.current = true;
     const content = message.trim();
-    setMessage("");
-    setSending(true);
-    setAiBusy(true);
-    setError(null);
-
-    const userTurn: Turn = {
-      id: "user-" + Date.now(),
-      speaker: "user",
-      content,
-      created_at: new Date().toISOString(),
-    };
-    setSession((prev) => (prev ? { ...prev, turns: [...prev.turns, userTurn] } : prev));
-
+    if (pendingText.current?.content !== content) pendingText.current = { content, id: crypto.randomUUID() };
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setSending(true); setAiBusy(true); setError(null);
     try {
-      const data: Turn = await authedFetch(getToken, `/conversations/${session.id}/respond`, {
-        method: "POST",
-        body: JSON.stringify({ content }),
+      await authedFetch(getToken, `/conversations/${session.id}/respond`, {
+        method: "POST", signal: controller.signal,
+        body: JSON.stringify({ content, request_id: pendingText.current.id }),
       });
-      setSession((prev) => (prev ? { ...prev, turns: [...prev.turns, data] } : prev));
-    } catch {
-      setError("Your message didn't get through — check the backend and try again.");
-      setSession((prev) =>
-        prev ? { ...prev, turns: prev.turns.filter((t) => t.id !== userTurn.id) } : prev
-      );
+      await refreshSession(session.id, controller.signal);
+      if (mounted.current) setMessage("");
+      pendingText.current = null;
+    } catch (err) {
+      if (mounted.current) setError(err instanceof Error ? err.message : "Message failed. Retry to recover your response.");
+    } finally {
+      busyRef.current = false;
+      if (mounted.current) { setSending(false); setAiBusy(false); }
     }
-    setSending(false);
-    setAiBusy(false);
   }
 
   async function toggleRecording() {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      await startRecording();
-    }
-  }
-
-  async function startRecording() {
-    if (!session) return;
-    setError(null);
-    try {
-      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-        audioCtxRef.current = new AudioContext();
-      }
-      if (audioCtxRef.current.state === "suspended") {
-        await audioCtxRef.current.resume();
-      }
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch {
-        setError("Microphone access was denied. Check browser permissions and try again.");
-        return;
-      }
-      streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-      interimLastSentRef.current = 0;
-      setLiveTranscript("");
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-          maybeSendInterim();
-        }
-      };
-
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-        sendVoiceMessage(blob);
-      };
-
-      recorder.start(1000);
-      setIsRecording(true);
-    } catch (err) {
-      setError("Could not start recording.");
-      console.error("Recording failed:", err);
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }
-
-  async function maybeSendInterim() {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== "recording") return;
-    const now = Date.now();
-    if (interimInFlightRef.current || now - interimLastSentRef.current < 2000) return;
-    interimLastSentRef.current = now;
-    interimInFlightRef.current = true;
-    try {
-      const token = await getToken();
-      if (!token) return;
-      const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-      const formData = new FormData();
-      formData.append("file", blob, "interim." + (blob.type.includes("webm") ? "webm" : "ogg"));
-      const res = await fetch(`${API}/voice/stt`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (mediaRecorderRef.current === recorder && recorder.state === "recording" && data?.text) {
-        setLiveTranscript(data.text);
-      }
-    } catch {
-      // transient interim failure — ignore, final transcription still runs
-    } finally {
-      interimInFlightRef.current = false;
-    }
+    if (isRecording) voice.stop();
+    else if (!busyRef.current && !completing) await voice.start();
   }
 
   async function sendVoiceMessage(blob: Blob) {
-    if (!session) return;
-    setSending(true);
-    setAiBusy(true);
-    setError(null);
-
-    const token = await getToken();
-    if (!token) {
-      setSending(false);
-      setAiBusy(false);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", blob, "recording." + (blob.type.includes("webm") ? "webm" : "ogg"));
-    formData.append("session_id", session.id);
-
+    if (!session || busyRef.current || completing) return;
+    busyRef.current = true;
+    if (pendingVoice.current?.blob !== blob) pendingVoice.current = { blob, id: crypto.randomUUID() };
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setSending(true); setAiBusy(true); setError(null); setCanRetryVoice(false);
     try {
+      const token = await getToken();
+      if (!token) throw new Error("Please sign in again.");
+      const formData = new FormData();
+      formData.append("file", blob, "recording");
+      formData.append("session_id", session.id);
+      formData.append("request_id", pendingVoice.current.id);
       const response = await fetch(`${API}/voice/converse`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+        method: "POST", signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}` }, body: formData,
       });
-
-      if (!response.ok || !response.body) {
-        setError("Voice request failed.");
-        setSending(false);
-        setAiBusy(false);
-        return;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "Voice request failed.");
       }
-
+      if (!response.body) throw new Error("No voice response received.");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            const raw = line.slice(6);
-            if (currentEvent === "transcription") {
-              const text = JSON.parse(raw).data;
-              setLiveTranscript("");
-              setSession((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      turns: [
-                        ...prev.turns,
-                        { id: "voice-user-" + Date.now(), speaker: "user", content: text, created_at: new Date().toISOString() },
-                      ],
-                    }
-                  : prev
-              );
-            } else if (currentEvent === "mic_quality") {
-              setMicQuality(JSON.parse(raw).data);
-            } else if (currentEvent === "ai_response") {
-              const text = JSON.parse(raw).data;
-              setSession((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      turns: [
-                        ...prev.turns,
-                        { id: "voice-ai-" + Date.now(), speaker: "ai", content: text, created_at: new Date().toISOString() },
-                      ],
-                    }
-                  : prev
-              );
-            } else if (currentEvent === "audio") {
-              const { data: b64 } = JSON.parse(raw);
-              if (b64 && b64.length > 0) {
-                try {
-                  const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-                  const ctx = audioCtxRef.current;
-                  if (ctx && ctx.state !== "closed") {
-                    const buf = await ctx.decodeAudioData(binary.buffer);
-                    const source = ctx.createBufferSource();
-                    source.buffer = buf;
-                    source.connect(ctx.destination);
-                    source.start();
-                  }
-                } catch (e) {
-                  console.error("Audio playback failed:", e);
-                }
-              }
+      const parser = new SSEParser();
+      let finished = false;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const event of parser.push(decoder.decode(value, { stream: true }))) {
+            const payload = JSON.parse(event.data);
+            if (event.event === "error") throw new Error(payload.message);
+            if (event.event === "warning" && mounted.current) setError(payload.data);
+            if (event.event === "transcription" && mounted.current) setLiveTranscript(payload.data);
+            if (event.event === "mic_quality" && mounted.current) setMicQuality(payload.data);
+            if (event.event === "ai_response") {
+              // The turn is already committed; show text before speech synthesis finishes.
+              await refreshSession(session.id, controller.signal);
+              if (mounted.current) { setLiveTranscript(""); setAiBusy(false); }
             }
+            if (event.event === "audio" && mounted.current) {
+              try { await voice.play(payload.data); }
+              catch { setError("Your response was saved, but audio playback failed."); }
+            }
+            if (event.event === "done") finished = true;
           }
         }
-      }
+      } finally { await reader.cancel(); reader.releaseLock(); }
+      if (!finished) throw new Error("Connection interrupted. Retry to recover the response.");
+      await refreshSession(session.id, controller.signal);
+      pendingVoice.current = null;
     } catch (err) {
-      setError("Voice conversation failed — try typing instead.");
-      console.error("Voice converse failed:", err);
+      if (mounted.current) {
+        setError(err instanceof Error ? err.message : "Voice request failed.");
+        setCanRetryVoice(true);
+      }
+    } finally {
+      busyRef.current = false;
+      if (mounted.current) { setSending(false); setAiBusy(false); setLiveTranscript(""); }
     }
-    setSending(false);
-    setAiBusy(false);
   }
 
-  async function completeConversation() {
+  const completeConversation = useCallback(async (reason?: string) => {
     if (!session || completing) return;
+    if (isRecording) {
+      voice.stop();
+    }
+    busyRef.current = true;
     setCompleting(true);
     setError(null);
     try {
-      const token = await getToken();
-      const res = await fetch(`${API}/conversations/${session.id}/complete`, {
+      const controller = new AbortController();
+      requestRef.current = controller;
+      const data = await authedFetch(getToken, `/conversations/${session.id}/complete`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+        body: reason ? JSON.stringify({ reason }) : undefined,
       });
-      if (!res.ok) throw new Error("Could not complete conversation");
-      const data = await res.json();
+      if (!mounted.current) return;
       if (data.report_id) {
-        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(`${SESSION_KEY}:${userId}`);
         router.push(`/reports/${data.report_id}`);
       }
     } catch {
-      setError("Failed to complete the conversation. Try again.");
-      setCompleting(false);
+      if (mounted.current) {
+        setError("Failed to complete the conversation. Try again.");
+        setCompleting(false);
+      }
+      busyRef.current = false;
     }
-  }
+  }, [session, completing, isRecording, voice, getToken, userId, router]);
+
+  const completeRef = useRef(completeConversation);
+  completeRef.current = completeConversation;
+
+  useEffect(() => {
+    if (!session || session.status !== "active") return;
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session]);
+
+  const startMs = session?.created_at ? new Date(session.created_at).getTime() : now;
+  const elapsed = Math.floor((now - startMs) / 1000);
+  const timeLeft = session ? Math.max(0, SCENARIO_TIME_LIMIT_SECONDS - elapsed) : SCENARIO_TIME_LIMIT_SECONDS;
+
+  useEffect(() => {
+    if (!session || session.status !== "active" || timeLeft > 0) return;
+    if (timedOutHandled.current) return;
+    timedOutHandled.current = true;
+    void completeRef.current("time_expired");
+  }, [session, timeLeft]);
 
   function newConversation() {
+    if (busyRef.current || isRecording || voice.starting || completing) return;
+    pendingText.current = null; pendingVoice.current = null; setCanRetryVoice(false);
+    timedOutHandled.current = false;
+    setNow(Date.now());
     setSession(null);
     setMessage("");
     setError(null);
     setLiveTranscript("");
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(`${SESSION_KEY}:${userId}`);
   }
 
   return (
@@ -345,6 +267,11 @@ export default function ConversationPage() {
           </div>
         )}
 
+        {canRetryVoice && pendingVoice.current && (
+          <button className="mb-4 text-sm underline" disabled={sending || isRecording || completing} onClick={() => { if (pendingVoice.current) void sendVoiceMessage(pendingVoice.current.blob); }}>
+            Retry recorded message
+          </button>
+        )}
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
             <p className="text-neutral-400 animate-pulse">Loading conversation…</p>
@@ -366,19 +293,37 @@ export default function ConversationPage() {
           <div className="flex flex-1 flex-col-reverse md:flex-row gap-6 min-h-0">
             <div className="flex-1 min-w-0 flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-medium">
-                  {scenarioNames[session.scenario] || session.scenario}
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-medium">
+                    {scenarioNames[session.scenario] || session.scenario}
+                  </h2>
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-colors ${
+                      timeLeft <= 30
+                        ? "bg-red-50 text-red-700 border-red-300 animate-pulse dark:bg-red-950/60 dark:text-red-300 dark:border-red-800"
+                        : timeLeft <= 60
+                        ? "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800"
+                        : "bg-neutral-50 text-neutral-700 border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700"
+                    }`}
+                    title="5-minute scenario limit"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                    </svg>
+                    <span>{timeLeft === 0 ? "0:00" : formatTime(timeLeft)}</span>
+                  </div>
+                </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={completeConversation}
-                    disabled={completing || session.turns.length === 0}
+                    onClick={() => completeConversation()}
+                    disabled={completing || sending || isRecording || voice.starting || !session.turns.some(t => t.speaker === "user")}
                     className="text-sm text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40"
                   >
-                    {completing ? "Completing…" : "Complete & get feedback"}
+                    {completing ? (timeLeft <= 0 ? "Time's up! Generating…" : "Completing…") : "Complete & get feedback"}
                   </button>
                   <button
                     onClick={newConversation}
+                    disabled={sending || isRecording || voice.starting || completing}
                     className="text-sm text-neutral-400 hover:text-neutral-600"
                   >
                     New conversation
@@ -405,7 +350,7 @@ export default function ConversationPage() {
                     </div>
                   </div>
                 ))}
-                {isRecording && liveTranscript && (
+                {(isRecording || sending) && liveTranscript && (
                   <div className="flex justify-end">
                     <div className="max-w-[75%] rounded-2xl px-4 py-2 text-sm leading-relaxed bg-neutral-800 text-neutral-100 italic">
                       {liveTranscript}
@@ -428,25 +373,36 @@ export default function ConversationPage() {
                 <div ref={chatEndRef} />
               </div>
 
+              {timeLeft <= 0 && (
+                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs sm:text-sm text-amber-800 flex items-center gap-2 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  </svg>
+                  <span>5 minutes are up! Automatically completing conversation and generating your feedback…</span>
+                </div>
+              )}
+
               <div className="flex gap-2 pb-6">
                 <input
+                  aria-label="Your response"
+                  maxLength={8000}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                  placeholder="Type your response..."
-                  disabled={sending || isRecording || completing}
+                  placeholder={timeLeft <= 0 ? "Time has expired. Generating feedback…" : "Type your response..."}
+                  disabled={sending || isRecording || voice.starting || completing || timeLeft <= 0}
                   className="flex-1 border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={!message.trim() || sending || isRecording || completing}
+                  disabled={!message.trim() || sending || isRecording || voice.starting || completing || timeLeft <= 0}
                   className="bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium disabled:opacity-40"
                 >
                   Send
                 </button>
                 <button
                   onClick={toggleRecording}
-                  disabled={sending || completing}
+                  disabled={sending || completing || voice.starting || timeLeft <= 0}
                   className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
                     isRecording
                       ? "bg-red-600 text-white animate-pulse"

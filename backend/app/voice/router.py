@@ -1,77 +1,98 @@
+import base64
 import json
-
-from fastapi import APIRouter, Depends, UploadFile, status
+from threading import BoundedSemaphore
+from uuid import UUID
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-
 from app.auth.deps import get_current_user
+from app.core.settings import settings
 from app.models.user import User
 from app.voice.service import VoiceService
 from database import get_db
 
 router = APIRouter(prefix="/voice", tags=["voice"])
+_slots = BoundedSemaphore(settings.VOICE_CONCURRENCY)
 
-
-def get_voice_service() -> VoiceService:
+def get_voice_service():
     return VoiceService()
 
+async def read_audio(file):
+    try:
+        data = await file.read(settings.MAX_AUDIO_BYTES + 1)
+        if not data or len(data) > settings.MAX_AUDIO_BYTES:
+            raise HTTPException(413, f"Audio must be nonempty and at most {settings.MAX_AUDIO_BYTES / 1024 / 1024:g} MB")
+        return data
+    finally:
+        await file.close()
+
+def acquire():
+    if not _slots.acquire(blocking=False):
+        raise HTTPException(429, "Voice service is busy. Try again shortly.", headers={"Retry-After": "3"})
 
 @router.post("/stt")
-def transcribe(
-    file: UploadFile,
-    current_user: User = Depends(get_current_user),
-    service: VoiceService = Depends(get_voice_service),
-):
-    audio_data = file.file.read()
-    fmt = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else None
-    text = service.transcribe(audio_data, fmt)
-    return {"text": text}
+async def transcribe(file: UploadFile, current_user: User = Depends(get_current_user),
+                     service: VoiceService = Depends(get_voice_service)):
+    acquire()
+    try:
+        data = await read_audio(file)
+        text = await run_in_threadpool(service.transcribe, data)
+        return {"text": text}
+    finally:
+        _slots.release()
 
+class SpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
 
 @router.post("/tts")
-async def synthesize(
-    text: str,
-    current_user: User = Depends(get_current_user),
-    service: VoiceService = Depends(get_voice_service),
-):
-    audio = await service.synthesize(text)
-    return StreamingResponse(
-        iter([audio]),
-        media_type="audio/wav",
-        headers={"Content-Disposition": "inline; filename=response.wav"},
-    )
-
+async def synthesize(body: SpeechRequest, current_user: User = Depends(get_current_user),
+                     service: VoiceService = Depends(get_voice_service)):
+    acquire()
+    try:
+        audio = await service.synthesize(body.text)
+        return StreamingResponse(iter([audio]), media_type="application/octet-stream")
+    finally:
+        _slots.release()
 
 @router.post("/converse")
-async def converse(
-    file: UploadFile,
-    session_id: str | None = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    service: VoiceService = Depends(get_voice_service),
-):
-    audio_data = await file.read()
-    fmt = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else None
-
-    sid = session_id or service.get_or_create_session(db, current_user.id)
+async def converse(file: UploadFile, session_id: str = Form(...), request_id: UUID = Form(...),
+                   current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
+                   service: VoiceService = Depends(get_voice_service)):
+    # Authorization happens before expensive processing and before streaming headers.
+    session = await run_in_threadpool(service.conversation.get_session, db, session_id, current_user.id)
+    if session.status != "active":
+        raise HTTPException(409, "Session is not active")
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+    if (now - created_at).total_seconds() >= 300:
+        session.status = "timed_out"
+        db.commit()
+        raise HTTPException(400, "Session time limit expired (5 minutes). Please complete the conversation to view feedback.")
+    user_id = current_user.id
+    acquire()
+    try:
+        audio_data = await read_audio(file)
+    except BaseException:
+        _slots.release()
+        raise
 
     async def event_stream():
-        async for event_type, data in service.converse(db, current_user.id, sid, audio_data, source_format=fmt):
-            if event_type == "audio":
-                import base64
-                payload = json.dumps({"type": "audio", "data": base64.b64encode(data).decode()})
-                yield f"event: audio\ndata: {payload}\n\n"
-            else:
-                payload = json.dumps({"type": event_type, "data": data})
-                yield f"event: {event_type}\ndata: {payload}\n\n"
-        yield "event: done\ndata: {}\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+        try:
+            async for kind, data in service.converse(db, user_id, session_id, audio_data, request_id=str(request_id)):
+                if kind == "audio":
+                    data = base64.b64encode(data).decode()
+                yield f"event: {kind}\ndata: {json.dumps({'type': kind, 'data': data})}\n\n"
+            yield "event: done\ndata: {}\n\n"
+        except HTTPException as exc:
+            yield f"event: error\ndata: {json.dumps({'message': exc.detail})}\n\n"
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Voice stream failed")
+            yield 'event: error\ndata: {"message":"Voice request failed. Please retry."}\n\n'
+        finally:
+            _slots.release()
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

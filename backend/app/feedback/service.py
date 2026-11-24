@@ -1,6 +1,5 @@
 import json
 import logging
-import threading
 
 from sqlalchemy.orm import Session
 
@@ -37,15 +36,28 @@ class FeedbackService:
             user_turns = [t.content for t in turns if t.speaker == "user"]
             ai_turns = [t.content for t in turns if t.speaker == "ai"]
 
-            scenario_id = report.session.scenario if report.session else ""
+            session = report.session
+            scenario_id = session.scenario if session else ""
+            timed_out = (session.status == "timed_out") if session else False
+            if session and not timed_out:
+                from datetime import timezone
+                created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
+                rep_time = report.created_at if report.created_at.tzinfo else report.created_at.replace(tzinfo=timezone.utc)
+                if (rep_time - created_at).total_seconds() >= 300:
+                    timed_out = True
+
             from app.conversations.scenarios import get_scenario
             scenario = get_scenario(scenario_id) or {}
             persona = scenario.get("persona", {})
 
-            transcript = self._build_transcript(user_turns, ai_turns)
-            rag_context = self.rag.retrieve_context(scenario_id, transcript)
+            transcript = "\n".join(f"{'User' if t.speaker == 'user' else 'AI'}: {t.content}" for t in turns)
+            try:
+                rag_context = self.rag.retrieve_context(scenario_id, transcript)
+            except Exception:
+                logger.exception("Optional research retrieval unavailable")
+                rag_context = ""
 
-            analysis = self.analyzer.analyze(scenario_id, user_turns, ai_turns)
+            analysis = self.analyzer.analyze(scenario_id, user_turns, ai_turns, timed_out=timed_out)
 
             suggestions = None
             if self.advisor is not None:
@@ -60,10 +72,14 @@ class FeedbackService:
                 persona.get("name", ""),
                 rag_context=rag_context,
                 suggestions=suggestions,
+                timed_out=timed_out,
             )
 
             report.content = content
-            report.title = f"Feedback — {scenario.get('name', 'Conversation')}"
+            report_title = f"Feedback — {scenario.get('name', 'Conversation')}"
+            if timed_out:
+                report_title += " (Timed Out)"
+            report.title = report_title
             db.commit()
 
             from app.reports.service import ReportService
@@ -74,29 +90,24 @@ class FeedbackService:
                 logger.info("Report %s generated and stored successfully", report_id)
         except Exception as e:
             logger.error("Report generation failed for %s: %s", report_id, e)
-            report.status = "failed"
-            db.commit()
+            db.rollback()
+            report = db.get(Report, report_id)
+            if report:
+                report.status = "failed"
+                db.commit()
 
-    def _build_transcript(self, user_turns: list[str], ai_turns: list[str]) -> str:
-        lines = []
-        for i in range(max(len(user_turns), len(ai_turns))):
-            if i < len(user_turns):
-                lines.append(f"User: {user_turns[i]}")
-            if i < len(ai_turns):
-                lines.append(f"AI: {ai_turns[i]}")
-        return "\n".join(lines)
-
-    def queue_generation(self, db: Session, report_id: str):
-        thread = threading.Thread(target=self._run_generation, args=(report_id,), daemon=True)
-        thread.start()
-
-    def _run_generation(self, report_id: str):
-        from database import SessionLocal
-        db = SessionLocal()
-        try:
-            self.generate_report(db, report_id)
-        finally:
-            db.close()
+    @staticmethod
+    def queue_generation(db: Session, report_id: str):
+        """Persist with the caller's transaction; the separate worker executes it."""
+        from app.models.report_job import ReportJob
+        from datetime import datetime, timezone
+        job = db.get(ReportJob, report_id)
+        if job is None:
+            db.add(ReportJob(report_id=report_id))
+        else:
+            job.status = "pending"
+            job.attempts = 0
+            job.available_at = datetime.now(timezone.utc)
 
     def get_report(self, db: Session, session_id: str, user_id: str) -> Report | None:
         return (

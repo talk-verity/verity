@@ -5,38 +5,38 @@ import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import StatusBadge from "@/components/StatusBadge";
-import { authedFetch, ROOT, SESSION_KEY, type ReportData, type Scenario } from "@/lib/api";
+import { authedFetch, SESSION_KEY, type ReportData, type Scenario } from "@/lib/api";
 
 export default function DashboardPage() {
-  const { isSignedIn, getToken } = useAuth();
-  const [health, setHealth] = useState("Checking...");
+  const { isSignedIn, getToken, userId } = useAuth();
   const [reports, setReports] = useState<ReportData[]>([]);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [activeSession, setActiveSession] = useState<string | null>(() =>
-    typeof window !== "undefined" ? localStorage.getItem(SESSION_KEY) : null
-  );
+  const [activeSession, setActiveSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${ROOT}/health`)
-      .then((r) => r.json())
-      .then((d) => setHealth(d.status))
-      .catch(() => setHealth("Unhealthy"));
-  }, []);
+  const [error, setError] = useState<string | null>(null);
+  const [latestFeedback, setLatestFeedback] = useState<ReportData | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
+    const controller = new AbortController();
+    const signal = controller.signal;
     Promise.all([
-      authedFetch(getToken, "/reports").catch(() => []),
-      authedFetch(getToken, "/conversations/scenarios").catch(() => []),
-    ])
-      .then(([r, s]) => {
-        setActiveSession(localStorage.getItem(SESSION_KEY));
-        setReports(r as ReportData[]);
-        setScenarios(s as Scenario[]);
-      })
-      .finally(() => setLoading(false));
-  }, [isSignedIn, getToken]);
+      authedFetch(getToken, "/reports", { signal }),
+      authedFetch(getToken, "/conversations/scenarios", { signal }),
+    ]).then(async ([r, s]) => {
+      if (signal.aborted) return;
+      setActiveSession(localStorage.getItem(`${SESSION_KEY}:${userId}`));
+      setReports(r as ReportData[]);
+      setScenarios(s as Scenario[]);
+      const latest = (r as ReportData[]).find(report => report.status === "ready");
+      if (latest) {
+        const detail = await authedFetch(getToken, `/reports/${latest.id}`, { signal });
+        if (!signal.aborted) setLatestFeedback(detail);
+      }
+    }).catch(err => { if (!signal.aborted) setError(err.message); })
+      .finally(() => { if (!signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [isSignedIn, getToken, userId]);
 
   const readyCount = reports.filter((r) => r.status === "ready").length;
 
@@ -47,7 +47,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
             <p className="mt-1 text-sm text-neutral-500">
-              Backend: {health}
+              Choose one communication skill to practice, then review the transcript.
             </p>
           </div>
           <Link
@@ -58,6 +58,14 @@ export default function DashboardPage() {
           </Link>
         </div>
 
+        {error && <p role="alert" className="mt-6 text-sm text-red-700">{error}</p>}
+        {latestFeedback?.content?.recommendations?.[0] && (
+          <section className="mt-6 rounded-2xl border border-indigo-200 px-5 py-4">
+            <h2 className="text-sm font-medium">Your next practice</h2>
+            <p className="mt-2 text-sm text-neutral-600">{latestFeedback.content.recommendations[0]}</p>
+            <Link href={`/reports/${latestFeedback.id}`} className="mt-2 inline-block text-sm underline">Review your latest feedback</Link>
+          </section>
+        )}
         {activeSession && (
           <Link
             href="/conversation"
@@ -72,7 +80,7 @@ export default function DashboardPage() {
 
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
           <StatCard label="Reports" value={loading ? "…" : reports.length} />
-          <StatCard label="Ready" value={loading ? "…" : readyCount} />
+          <StatCard label="Feedback available" value={loading ? "…" : readyCount} />
           <StatCard label="Scenarios" value={loading ? "…" : scenarios.length} />
         </div>
 

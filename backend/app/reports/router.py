@@ -92,6 +92,32 @@ def download_report(
     return Response(content=data, media_type="text/html")
 
 
+@router.post("/{report_id}/process", response_model=RetryResponse)
+def process_report(
+    report_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    service: ReportService = Depends(get_report_service),
+):
+    """Execute one durable job inside a request on hosts without a worker."""
+    report = service.get_report(db, report_id, current_user.id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    from app.core.settings import settings
+    if settings.REPORT_EXECUTION_MODE == "request" and report.status == "generating":
+        user_id = current_user.id
+        # Release the authorization read transaction before claiming on another
+        # connection. The worker keeps its PostgreSQL lock until work finishes.
+        db.rollback()
+        from app.feedback.worker import run_once
+        run_once(report_id=report_id)
+        db.expire_all()
+        report = service.get_report(db, report_id, user_id)
+        if not report:
+            raise HTTPException(404, "Report not found")
+    return RetryResponse(report_id=report_id, status=report.status)
+
+
 @router.post("/{report_id}/retry", response_model=RetryResponse)
 def retry_report(
     report_id: str,
@@ -101,7 +127,22 @@ def retry_report(
 ):
     if not service.get_report(db, report_id, current_user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    new_status = service.retry_render(db, report_id)
+    from app.models.report_job import ReportJob
+    db.query(ReportJob).filter(ReportJob.report_id == report_id).with_for_update().first()
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(404, "Report not found")
+    db.refresh(report)
+    if report.status == "failed":
+        from app.feedback.service import FeedbackService
+        FeedbackService.queue_generation(db, report_id)
+        report.status = "generating"
+        db.commit()
+        new_status = "generating"
+    elif report.status == "generating":
+        new_status = "generating"
+    else:
+        new_status = service.retry_render(db, report_id)
     return RetryResponse(report_id=report_id, status=new_status)
 
 

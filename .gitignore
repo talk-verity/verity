@@ -1,5 +1,9 @@
 .venv/
 .env
+.env.*
+!.env.example
+!.env.*.example
+.vercel/
 __pycache__/
 node_modules/
 .next/
@@ -8,3 +12,17 @@ node_modules/
 backend/app/voice/parakeet_assets/
 backend/app/voice/vibevoice_assets/model/
 backend/vendor/
+# Generated local state
+.DS_Store
+*.tsbuildinfo
+backend/storage/
+.pytest_cache/
+cleanup-report.json
+
+# Alternate and backed-up Python environments
+.venv*/
+
+# Also ignore the local virtualenv symlink
+backend/.venv
+
+backend/app/voice/kokoro_assets/

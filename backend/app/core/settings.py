@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -12,7 +13,17 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Verity"
     VERSION: str = "0.1.0"
     API_V1_PREFIX: str = "/api/v1"
-    DEBUG: bool = True
+    DEBUG: bool = False
+    DEMO_MODE: bool = False
+    REPORT_EXECUTION_MODE: Literal["worker", "request"] = "worker"
+    REPORT_STORAGE_MODE: Literal["local", "database"] = "local"
+    FFMPEG_BINARY: str = "ffmpeg"
+    MAX_AUDIO_BYTES: int = 10 * 1024 * 1024
+    MAX_AUDIO_SECONDS: int = 120
+    VOICE_CONCURRENCY: int = 2
+    CLERK_JWKS_TTL_SECONDS: int = 300
+    CLERK_AUDIENCE: str = ""
+    CLERK_AUTHORIZED_PARTIES: List[str] = ["http://localhost:3000"]
 
     DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/verity"
     SECRET_KEY: str = "change-me-to-a-random-secret-key"
@@ -30,7 +41,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "models/gemini-2.0-flash"
 
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
 
     STT_PROVIDER: str = "mock"
     GROQ_STT_MODEL: str = "whisper-large-v3-turbo"
@@ -39,9 +50,11 @@ class Settings(BaseSettings):
     PARAKEET_NUM_THREADS: int = 4
 
     TTS_PROVIDER: str = "mock"
+    KOKORO_VOICE: str = "af_heart"
     TTS_VOICE: str = "en-US-JennyNeural"
     VIBEVOICE_SPEAKER: str = "en-Carter_man"
     VIBEVOICE_MODEL: str = ""
+    VIBEVOICE_DEVICE: str = ""
 
     PINECONE_API_KEY: str = ""
     PINECONE_ENVIRONMENT: str = "us-east-1"

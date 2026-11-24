@@ -22,6 +22,15 @@ class ReportService:
         try:
             content = json.loads(report.content) if report.content else {}
             html = self.renderer.render_html(content)
+            from app.core.settings import settings
+            if settings.REPORT_STORAGE_MODE == "database":
+                # Structured content is already committed in PostgreSQL. Render
+                # downloads on demand without writing into a read-only bundle.
+                report.storage_key = None
+                report.storage_url = None
+                report.status = "ready"
+                db.commit()
+                return "ready"
             key = f"reports/{report.id}.html"
             url = self.storage.upload(key, html.encode("utf-8"))
             report.storage_key = key

@@ -21,7 +21,7 @@ class GeminiClient(AIService):
     def _get_client(self):
         if self._client is None:
             from google import genai
-            self._client = genai.Client(api_key=self.api_key)
+            self._client = genai.Client(api_key=self.api_key, http_options={"timeout": 30000})
         return self._client
 
     def generate(self, prompt: str) -> str:
@@ -164,7 +164,7 @@ class GroqClient(AIService):
         from groq import Groq
         self.api_key = api_key or settings.GROQ_API_KEY
         self.model = model or settings.GROQ_MODEL
-        self._client = Groq(api_key=self.api_key)
+        self._client = Groq(api_key=self.api_key, timeout=30, max_retries=0)
 
     def generate(self, prompt: str) -> str:
         try:
@@ -174,6 +174,11 @@ class GroqClient(AIService):
             )
             return response.choices[0].message.content
         except Exception as e:
+            # Retrying invalid credentials, inaccessible models, or bad requests
+            # cannot succeed without a configuration change.
+            status = getattr(e, "status_code", None)
+            if status is not None and 400 <= status < 500 and status not in (408, 409, 429):
+                raise
             logger.warning("Groq API call failed (attempt 1/2): %s", e)
             try:
                 response = self._client.chat.completions.create(

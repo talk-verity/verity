@@ -7,7 +7,7 @@ import AuthGate from "@/components/AuthGate";
 import { authedFetch, SESSION_KEY, type Scenario } from "@/lib/api";
 
 export default function ScenariosPage() {
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, getToken, userId } = useAuth();
   const router = useRouter();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,7 +20,7 @@ export default function ScenariosPage() {
       .then((data) => setScenarios(data as Scenario[]))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [isSignedIn, getToken]);
+  }, [isSignedIn, getToken, userId]);
 
   async function startConversation(scenario: Scenario) {
     setCreatingId(scenario.id);
@@ -30,7 +30,7 @@ export default function ScenariosPage() {
         method: "POST",
         body: JSON.stringify({ scenario_id: scenario.id }),
       });
-      localStorage.setItem(SESSION_KEY, data.id);
+      localStorage.setItem(`${SESSION_KEY}:${userId}`, data.id);
       router.push("/conversation");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start conversation");

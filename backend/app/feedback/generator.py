@@ -14,13 +14,15 @@ class FeedbackGenerator:
         persona_name: str,
         rag_context: str = "",
         suggestions: dict | None = None,
+        timed_out: bool = False,
     ) -> str:
+        timed_out = timed_out or bool(analysis.get("timed_out"))
         score = analysis.get("overall_score", 0)
         strengths = analysis.get("strengths", [])
         weaknesses = analysis.get("weaknesses", [])
         goal = analysis.get("goal_completion", "unknown")
 
-        recommendations = self._build_recommendations(analysis)
+        recommendations = self._build_recommendations(analysis, timed_out=timed_out)
         suggested_responses = None
         if suggestions:
             if suggestions.get("recommendations"):
@@ -32,7 +34,12 @@ class FeedbackGenerator:
             "scenario": scenario_name,
             "persona": persona_name,
             "overall_score": score,
-            "summary": self._build_summary(score, goal),
+            "assessment_method": analysis.get("assessment_method", "legacy_heuristic"),
+            "assessment_note": analysis.get("assessment_note", "Legacy heuristic feedback; not a validated assessment."),
+            "timed_out": timed_out,
+            "time_limit_seconds": 300,
+            "rubric_observations": analysis.get("rubric_observations", []),
+            "summary": self._build_summary(score, goal, timed_out=timed_out),
             "metrics": {
                 "confidence": analysis.get("confidence_score", 0),
                 "clarity": analysis.get("clarity_score", 0),
@@ -75,25 +82,20 @@ class FeedbackGenerator:
             refs.append({"source": source, "snippet": text[:200]})
         return refs
 
-    def _build_summary(self, score: float, goal: str) -> str:
-        if score >= 80:
-            return "Strong performance. You communicated effectively and addressed the scenario goals well."
-        if score >= 60:
-            return "Decent performance with room for improvement in clarity and confidence."
-        return "Needs improvement. Focus on reducing filler words and speaking more directly."
+    def _build_summary(self, score, goal: str, timed_out: bool = False) -> str:
+        if timed_out:
+            return "The 5-minute time limit expired before the conversation objective was completed. Review your transcript cues below to identify where pacing and concise communication can help you achieve your goals within the time window."
+        return "Review the transcript observations below, then choose one skill to practice again. Goal achievement and communication quality require review in context."
 
-    def _build_recommendations(self, analysis: dict) -> list[str]:
+    def _build_recommendations(self, analysis: dict, timed_out: bool = False) -> list[str]:
         recs = []
+        if timed_out or analysis.get("timed_out"):
+            recs.append("Practice pacing: with a 5-minute time limit, aim to establish your key points early so you have time to address the scenario objective before time runs out.")
+        for item in analysis.get("rubric_observations", []):
+            if not item["observed"]:
+                recs.append(f"Review '{item['criterion']}' in your transcript. No matching text cue was found; this does not prove it was absent.")
         if analysis.get("filler_word_count", 0) > 3:
-            recs.append(f"Reduce filler words like '{', '.join(analysis.get('filler_words', [])[:3])}' — pause instead of filling silence.")
-        if analysis.get("confidence_score", 100) < 70:
-            recs.append("Use fewer hedging words (maybe, I think, I guess). State your points directly.")
-        if analysis.get("clarity_score", 100) < 70:
-            recs.append("Aim for shorter, more structured sentences. Lead with your main point.")
-        if "over-apologizes" in analysis.get("weaknesses", []):
-            recs.append("Avoid over-apologizing — replace 'sorry' with 'thank you for your patience'.")
-        if not analysis.get("strengths", []):
-            recs.append("Ask more questions and provide specific examples to strengthen engagement.")
-        if len(recs) < 2:
-            recs.append("Keep practicing — each conversation builds your communication skills.")
-        return recs
+            recs.append("Listen back for repeated filler sounds and consider a pause where it helps your meaning.")
+        recs.extend(["Compare your answer with the scenario goal and identify one concrete next step.",
+                     "Practice again, focusing on one specific change rather than a numerical score."])
+        return recs[:5]

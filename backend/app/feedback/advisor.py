@@ -96,6 +96,9 @@ class ResearchAdvisor:
 
         prompt = f"""You are a communication coach grounded in research. A user practiced the "{scenario.get('name')}" scenario.
 
+Transcript observations: {json.dumps(analysis.get("rubric_observations", []))}
+These text cues do not establish confidence, quality, or goal achievement. Do not invent weaknesses.
+
 Detected weaknesses: {', '.join(weaknesses) or 'none'}
 Detected strengths: {', '.join(strengths) or 'none'}
 

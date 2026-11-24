@@ -4,17 +4,15 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user
 from app.models.user import User
 from database import get_db
+from app.conversations.schemas import ConversationCreate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/session")
-def create_session(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    from app.models.session import Session as SessionModel
-    session = SessionModel(user_id=current_user.id)
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+def create_session(body: ConversationCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.conversations.service import ConversationService
+    session = ConversationService().create_session(db, current_user.id, body.scenario_id)
     return {"session_id": session.id, "status": session.status}
 
 

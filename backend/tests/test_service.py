@@ -86,3 +86,18 @@ class TestConversationService:
         with pytest.raises(HTTPException) as exc:
             service.respond(db_session, session.id, user_id, "Hello")
         assert exc.value.status_code == 400
+
+    def test_respond_after_time_limit_expired(self, db_session, service, user_id):
+        from datetime import datetime, timezone, timedelta
+        session = service.create_session(db_session, user_id, "networking_event")
+        # Simulate created 301 seconds ago
+        session.created_at = datetime.now(timezone.utc) - timedelta(seconds=301)
+        db_session.commit()
+
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            service.respond(db_session, session.id, user_id, "Hello after timeout")
+        assert exc.value.status_code == 400
+        assert "time limit expired" in exc.value.detail.lower()
+        db_session.refresh(session)
+        assert session.status == "timed_out"

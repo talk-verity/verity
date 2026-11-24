@@ -73,8 +73,11 @@ class LocalReportStorage(ReportStorage):
         self.base_dir = base_dir or LOCAL_STORAGE_DIR
 
     def _path(self, key: str) -> Path:
-        safe = key.replace("..", "").lstrip("/")
-        return (self.base_dir / safe).resolve()
+        base = self.base_dir.resolve()
+        path = (base / key).resolve()
+        if not path.is_relative_to(base) or path == base:
+            raise ValueError("Invalid storage key")
+        return path
 
     def upload(self, key: str, data: bytes, content_type: str = "text/html") -> str:
         path = self._path(key)

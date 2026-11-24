@@ -62,8 +62,10 @@ class TestVoiceService:
                 raise RuntimeError("STT failed")
 
         service = VoiceService(stt=FailingSTT(), tts=MockTTSService())
-        result = service.transcribe(_wav_bytes())
-        assert result == STT_RETRY_TEXT
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as error:
+            service.transcribe(_wav_bytes())
+        assert error.value.status_code == 503
 
     @pytest.mark.asyncio
     async def test_converse_returns_events(self, voice_service, db_session, user_id):
@@ -73,10 +75,14 @@ class TestVoiceService:
         events = []
         async for event in voice_service.converse(db_session, user_id, session.id, _wav_bytes()):
             events.append(event)
-        assert len(events) >= 2
+        assert len(events) >= 3
         assert events[0][0] == "transcription"
-        assert events[1][0] == "ai_response"
-        assert "Sorry" not in events[1][1]
+        assert events[1][0] == "mic_quality"
+        assert events[2][0] == "ai_response"
+        assert "Sorry" not in events[2][1]
+        quality = events[1][1]
+        assert "quality" in quality
+        assert "score" in quality
 
     def test_get_or_create_session_creates_new(self, voice_service, db_session, user_id):
         sid = voice_service.get_or_create_session(db_session, user_id)
