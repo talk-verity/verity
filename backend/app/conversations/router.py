@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.conversations.schemas import (
-    ConversationCompleteRequest,
     ConversationCreate,
     ConversationResponse,
     ScenarioDetailResponse,
@@ -110,7 +109,6 @@ def respond(
 @router.post("/{session_id}/complete", status_code=200)
 def complete_conversation(
     session_id: str,
-    body: ConversationCompleteRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     service: ConversationService = Depends(get_conversation_service),
