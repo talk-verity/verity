@@ -1,3 +1,5 @@
+import { getReferralCode } from "@/lib/referral";
+
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 export const ROOT = API.replace(/\/api\/v1\/?$/, "");
 
@@ -83,7 +85,7 @@ export type ReportData = {
   updated_at: string;
 };
 
-export const SESSION_KEY = "verity_session_id";
+export const SESSION_KEY = "delphi_session_id";
 
 export class APIError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -94,12 +96,14 @@ export async function authedFetch(getToken: () => Promise<string | null>, path: 
   if (!token) {
     throw new Error("Not authenticated");
   }
+  const referral = getReferralCode();
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
+      ...init?.headers,
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      ...init?.headers,
+      ...(referral ? { "X-Delphi-Referral": referral } : {}),
     },
   });
   if (!res.ok) {

@@ -4,10 +4,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SSEParser } from "@/lib/sse";
+import { parseVoiceEvent, SSEParser } from "@/lib/sse";
+import { parseApiTimestamp } from "@/lib/time";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import AuthGate from "@/components/AuthGate";
 import ContextPanel from "@/components/ContextPanel";
+import {
+  CheckIcon,
+  ClockIcon,
+  KeyboardIcon,
+  MicIcon,
+  PauseIcon,
+  SparklesIcon,
+  StatusDot,
+} from "@/components/Icons";
 import {
   authedFetch,
   APIError,
@@ -46,6 +56,7 @@ export default function ConversationPage() {
   const [error, setError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
+  const [inputMode, setInputMode] = useState<"type" | "speak">("type");
   const timedOutHandled = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -73,7 +84,7 @@ export default function ConversationPage() {
     const load = async () => {
       if (!storedId) return null;
       try {
-        return await authedFetch(getToken, `/conversations/${storedId}`, { signal }) as SessionData;
+        return await authedFetch(getToken, `/conversations/${encodeURIComponent(storedId)}`, { signal }) as SessionData;
       } catch (err) {
         if (err instanceof APIError && err.status === 404) {
           localStorage.removeItem(`${SESSION_KEY}:${userId}`);
@@ -85,7 +96,7 @@ export default function ConversationPage() {
     load().then(data => {
       if (signal.aborted) return;
       setSession(data);
-      if (data) authedFetch(getToken, `/conversations/scenarios/${data.scenario}`, { signal })
+      if (data) authedFetch(getToken, `/conversations/scenarios/${encodeURIComponent(data.scenario)}`, { signal })
         .then(detail => { if (!signal.aborted) setScenarioDetail(detail); }).catch(() => {});
     }).catch(err => { if (!signal.aborted) setError(err.message); })
       .finally(() => { if (!signal.aborted) setLoading(false); });
@@ -97,7 +108,7 @@ export default function ConversationPage() {
   }, [session?.turns]);
 
   async function refreshSession(id: string, signal?: AbortSignal) {
-    const data = await authedFetch(getToken, `/conversations/${id}`, { signal });
+    const data = await authedFetch(getToken, `/conversations/${encodeURIComponent(id)}`, { signal });
     if (mounted.current) setSession(data);
   }
 
@@ -110,7 +121,7 @@ export default function ConversationPage() {
     requestRef.current = controller;
     setSending(true); setAiBusy(true); setError(null);
     try {
-      await authedFetch(getToken, `/conversations/${session.id}/respond`, {
+      await authedFetch(getToken, `/conversations/${encodeURIComponent(session.id)}/respond`, {
         method: "POST", signal: controller.signal,
         body: JSON.stringify({ content, request_id: pendingText.current.id }),
       });
@@ -161,22 +172,23 @@ export default function ConversationPage() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-            const payload = JSON.parse(event.data);
-            if (event.event === "error") throw new Error(payload.message);
-            if (event.event === "warning" && mounted.current) setError(payload.data);
-            if (event.event === "transcription" && mounted.current) setLiveTranscript(payload.data);
-            if (event.event === "mic_quality" && mounted.current) setMicQuality(payload.data);
-            if (event.event === "ai_response") {
+          for (const streamEvent of parser.push(decoder.decode(value, { stream: true }))) {
+            const payload = parseVoiceEvent(streamEvent);
+            if (payload.event === "error") throw new Error(payload.message);
+            if (payload.event === "unknown") continue;
+            if (payload.event === "warning" && mounted.current) setError(payload.data);
+            if (payload.event === "transcription" && mounted.current) setLiveTranscript(payload.data);
+            if (payload.event === "mic_quality" && mounted.current) setMicQuality(payload.data);
+            if (payload.event === "ai_response") {
               // The turn is already committed; show text before speech synthesis finishes.
               await refreshSession(session.id, controller.signal);
               if (mounted.current) { setLiveTranscript(""); setAiBusy(false); }
             }
-            if (event.event === "audio" && mounted.current) {
+            if (payload.event === "audio" && mounted.current) {
               try { await voice.play(payload.data); }
               catch { setError("Your response was saved, but audio playback failed."); }
             }
-            if (event.event === "done") finished = true;
+            if (payload.event === "done") finished = true;
           }
         }
       } finally { await reader.cancel(); reader.releaseLock(); }
@@ -194,7 +206,7 @@ export default function ConversationPage() {
     }
   }
 
-  const completeConversation = useCallback(async (reason?: string) => {
+  const completeConversation = useCallback(async (reason?: "time_expired") => {
     if (!session || completing) return;
     if (isRecording) {
       voice.stop();
@@ -205,7 +217,7 @@ export default function ConversationPage() {
     try {
       const controller = new AbortController();
       requestRef.current = controller;
-      const data = await authedFetch(getToken, `/conversations/${session.id}/complete`, {
+      const data = await authedFetch(getToken, `/conversations/${encodeURIComponent(session.id)}/complete`, {
         method: "POST",
         signal: controller.signal,
         body: reason ? JSON.stringify({ reason }) : undefined,
@@ -213,7 +225,7 @@ export default function ConversationPage() {
       if (!mounted.current) return;
       if (data.report_id) {
         localStorage.removeItem(`${SESSION_KEY}:${userId}`);
-        router.push(`/reports/${data.report_id}`);
+        router.push(`/reports/${encodeURIComponent(String(data.report_id))}`);
       }
     } catch {
       if (mounted.current) {
@@ -235,7 +247,7 @@ export default function ConversationPage() {
     return () => clearInterval(interval);
   }, [session]);
 
-  const startMs = session?.created_at ? new Date(session.created_at).getTime() : now;
+  const startMs = session?.created_at ? parseApiTimestamp(session.created_at) : now;
   const elapsed = Math.floor((now - startMs) / 1000);
   const timeLeft = session ? Math.max(0, SCENARIO_TIME_LIMIT_SECONDS - elapsed) : SCENARIO_TIME_LIMIT_SECONDS;
 
@@ -258,181 +270,322 @@ export default function ConversationPage() {
     localStorage.removeItem(`${SESSION_KEY}:${userId}`);
   }
 
+  function selectMode(mode: "type" | "speak") {
+    if (mode === "type" && isRecording) voice.stop();
+    setInputMode(mode);
+  }
+
+  const partnerName = scenarioDetail?.persona?.name || "Your partner";
+  const partnerInitial = partnerName.charAt(0);
+  const scenarioTitle = session
+    ? scenarioNames[session.scenario] || session.scenario
+    : "Conversation practice";
+
   return (
-    <AuthGate>
-      <main className="flex-1 w-full mx-auto max-w-5xl px-6 py-6 flex flex-col">
+    <AuthGate title="Conversation practice">
+      <main className="w-full bg-canvas px-5 pb-16 pt-8 sm:px-8 lg:px-[38px]">
         {error && (
-          <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
             {error}
           </div>
         )}
 
         {canRetryVoice && pendingVoice.current && (
-          <button className="mb-4 text-sm underline" disabled={sending || isRecording || completing} onClick={() => { if (pendingVoice.current) void sendVoiceMessage(pendingVoice.current.blob); }}>
+          <button
+            type="button"
+            className="mb-6 text-[13px] font-bold text-forest underline"
+            disabled={sending || isRecording || completing}
+            onClick={() => { if (pendingVoice.current) void sendVoiceMessage(pendingVoice.current.blob); }}
+          >
             Retry recorded message
           </button>
         )}
-        {loading ? (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-neutral-400 animate-pulse">Loading conversation…</p>
-          </div>
-        ) : !session ? (
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <h2 className="text-xl font-semibold">No active conversation</h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              Pick a scenario to start practicing.
+
+        <Link href="/scenarios" className="text-[14px] text-muted hover:text-forest">
+          ← Back to scenarios
+        </Link>
+
+        <div className="mt-4 flex flex-wrap items-start justify-between gap-6">
+          <div>
+            <h1 className="font-display text-[30px] font-semibold leading-[1.4] text-ink">
+              {loading ? "Preparing your practice…" : scenarioTitle}
+            </h1>
+            <p className="mt-2 text-[14px] text-muted">
+              {scenarioDetail?.difficulty
+                ? `${scenarioDetail.difficulty} · 5-minute guided conversation`
+                : "Guided practice · 5-minute conversation"}
             </p>
-            <Link
-              href="/scenarios"
-              className="mt-6 bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium"
-            >
-              Choose a scenario
-            </Link>
           </div>
-        ) : (
-          <div className="flex flex-1 flex-col-reverse md:flex-row gap-6 min-h-0">
-            <div className="flex-1 min-w-0 flex flex-col">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-medium">
-                    {scenarioNames[session.scenario] || session.scenario}
-                  </h2>
-                  <div
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-colors ${
-                      timeLeft <= 30
-                        ? "bg-red-50 text-red-700 border-red-300 animate-pulse dark:bg-red-950/60 dark:text-red-300 dark:border-red-800"
-                        : timeLeft <= 60
-                        ? "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800"
-                        : "bg-neutral-50 text-neutral-700 border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700"
-                    }`}
-                    title="5-minute scenario limit"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                    </svg>
-                    <span>{timeLeft === 0 ? "0:00" : formatTime(timeLeft)}</span>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => completeConversation()}
-                    disabled={completing || sending || isRecording || voice.starting || !session.turns.some(t => t.speaker === "user")}
-                    className="text-sm text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40"
-                  >
-                    {completing ? (timeLeft <= 0 ? "Time's up! Generating…" : "Completing…") : "Complete & get feedback"}
-                  </button>
-                  <button
-                    onClick={newConversation}
-                    disabled={sending || isRecording || voice.starting || completing}
-                    className="text-sm text-neutral-400 hover:text-neutral-600"
-                  >
-                    New conversation
-                  </button>
+          <div
+            className={`flex w-[206px] shrink-0 flex-col items-center gap-[5px] rounded-xl border px-5 py-4 ${
+              timeLeft <= 30
+                ? "border-red-200 bg-red-50 text-red-700"
+                : timeLeft <= 60
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-line bg-mint text-forest"
+            }`}
+            title="5-minute scenario limit"
+          >
+            <div className="flex w-full items-center justify-between">
+              <ClockIcon size={22} />
+              <span className="font-display text-[32px] font-semibold leading-none">
+                {timeLeft === 0 ? "0:00" : formatTime(timeLeft)}
+              </span>
+              <PauseIcon size={20} />
+            </div>
+            <span className="text-[10px] text-muted">Time remaining</span>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col items-start gap-6 lg:flex-row">
+          <div className="w-full lg:w-[306px] lg:shrink-0">
+            {scenarioDetail ? (
+              <ContextPanel scenario={scenarioDetail} />
+            ) : (
+              <GuidancePlaceholder loading={loading} />
+            )}
+            <MicQualityBadge quality={micQuality} />
+          </div>
+
+          <section className="flex min-h-[690px] w-full flex-col overflow-hidden rounded-2xl border border-line bg-white">
+            <div className="flex items-center gap-4 px-7 py-5">
+              <div className="flex size-[52px] shrink-0 items-center justify-center rounded-[26px] bg-line text-[28px] font-semibold leading-none text-ink">
+                {partnerInitial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[18px] font-medium leading-6 text-ink">{partnerName}</p>
+                <div className="mt-1 flex items-center gap-[7px]">
+                  <StatusDot className="text-forest" />
+                  <span className="text-[12px] text-muted">Your practice partner</span>
                 </div>
               </div>
+              <span className="shrink-0 rounded border border-line px-3 py-2 text-[10px] text-muted">
+                Guided simulation
+              </span>
+            </div>
 
-              <div className="flex-1 overflow-y-auto space-y-3 mb-4">
-                {session.turns.length === 0 && (
-                  <p className="text-neutral-400 text-sm text-center mt-8">
-                    The conversation starts here...
+            <div className="h-px bg-line" />
+
+            <div className="flex min-h-[360px] flex-1 flex-col gap-10 overflow-y-auto px-[30px] py-[30px]">
+              <p className="text-center text-[12px] text-muted">
+                A small moment to try something new. You&apos;ve got this.
+              </p>
+
+              {loading && (
+                <>
+                  <div className="h-16 rounded-xl bg-mint" />
+                  <div className="h-24 rounded-xl bg-mint-deep" />
+                </>
+              )}
+
+              {!loading && !session && (
+                <div className="mx-auto flex w-full max-w-[520px] flex-col gap-3 rounded-xl border border-line bg-mint px-6 py-8 text-center">
+                  <p className="font-display text-[18px] font-semibold text-ink">
+                    Your conversation starts here
                   </p>
-                )}
-                {session.turns.map((turn) => (
-                  <div key={turn.id} className={`flex ${turn.speaker === "user" ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
-                        turn.speaker === "user"
-                          ? "bg-neutral-900 text-white"
-                          : "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
-                      }`}
-                    >
+                  <p className="text-[13px] leading-5 text-muted">
+                    Choose a scenario to meet your practice partner. Your opening message and guidance will appear here.
+                  </p>
+                  <Link
+                    href="/scenarios"
+                    className="mx-auto rounded-lg bg-forest px-5 py-3 text-[13px] font-bold text-white"
+                  >
+                    Choose a scenario
+                  </Link>
+                </div>
+              )}
+
+              {session && session.turns.length === 0 && (
+                <p className="text-center text-[13px] text-muted">The conversation starts here…</p>
+              )}
+
+              {session?.turns.map((turn) =>
+                turn.speaker === "user" ? (
+                  <div key={turn.id} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl bg-forest px-5 py-3 text-[14px] leading-relaxed text-white">
                       {turn.content}
                     </div>
                   </div>
-                ))}
-                {(isRecording || sending) && liveTranscript && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[75%] rounded-2xl px-4 py-2 text-sm leading-relaxed bg-neutral-800 text-neutral-100 italic">
-                      {liveTranscript}
-                      <span className="inline-block w-1.5 h-4 ml-0.5 align-middle bg-neutral-400 animate-pulse" />
+                ) : (
+                  <div key={turn.id} className="flex items-start gap-[14px]">
+                    <div className="flex size-[35px] shrink-0 items-center justify-center rounded-[17px] bg-line text-[19px] font-semibold text-ink">
+                      {partnerInitial}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-2 text-[12px] text-muted">{partnerName}</p>
+                      <div className="rounded-br-[14px] rounded-tl-[14px] rounded-tr-[14px] bg-mint px-[22px] py-[17px] text-[16px] leading-[1.75] text-ink">
+                        {turn.content}
+                      </div>
                     </div>
                   </div>
-                )}
-                {(aiBusy || isRecording) && (
-                  <div className="flex justify-center py-2">
-                    <span className="inline-flex items-center gap-2 text-sm text-neutral-400">
-                      <span className="flex gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce [animation-delay:150ms]" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce [animation-delay:300ms]" />
-                      </span>
-                      {isRecording ? "Listening…" : "Responding…"}
-                    </span>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
+                )
+              )}
 
-              {timeLeft <= 0 && (
-                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs sm:text-sm text-amber-800 flex items-center gap-2 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-200">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                  </svg>
-                  <span>5 minutes are up! Automatically completing conversation and generating your feedback…</span>
+              {(isRecording || sending) && liveTranscript && (
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl bg-forest px-5 py-3 text-[14px] italic leading-relaxed text-white">
+                    {liveTranscript}
+                    <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-white/60 align-middle" />
+                  </div>
                 </div>
               )}
 
-              <div className="flex gap-2 pb-6">
-                <input
-                  aria-label="Your response"
-                  maxLength={8000}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                  placeholder={timeLeft <= 0 ? "Time has expired. Generating feedback…" : "Type your response..."}
-                  disabled={sending || isRecording || voice.starting || completing || timeLeft <= 0}
-                  className="flex-1 border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!message.trim() || sending || isRecording || voice.starting || completing || timeLeft <= 0}
-                  className="bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium disabled:opacity-40"
-                >
-                  Send
-                </button>
-                <button
-                  onClick={toggleRecording}
-                  disabled={sending || completing || voice.starting || timeLeft <= 0}
-                  className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
-                    isRecording
-                      ? "bg-red-600 text-white animate-pulse"
-                      : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 disabled:opacity-40"
-                  }`}
-                  title={isRecording ? "Stop recording" : "Record voice"}
-                >
-                  <MicIcon recording={isRecording} />
-                </button>
-              </div>
+              {(aiBusy || isRecording) && (
+                <div className="flex justify-center py-2">
+                  <span className="inline-flex items-center gap-2 text-[13px] text-muted">
+                    <span className="flex gap-1">
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted" />
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:150ms]" />
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:300ms]" />
+                    </span>
+                    {isRecording ? "Listening…" : "Responding…"}
+                  </span>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
             </div>
 
-            <div className="w-full md:w-72 md:shrink-0">
-              {scenarioDetail ? (
-                <div className="md:sticky md:top-6">
-                  <ContextPanel scenario={scenarioDetail} />
-                  <MicQualityBadge quality={micQuality} />
+            {timeLeft <= 0 && (
+              <div className="mx-6 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-[12px] text-amber-800">
+                5 minutes are up! Automatically completing your conversation and generating feedback…
+              </div>
+            )}
+
+            <div className="h-px bg-line" />
+
+            <div className="flex flex-col gap-2 px-[26px] py-3">
+              <div className="flex items-center gap-[14px]">
+                <button
+                  type="button"
+                  onClick={() => selectMode("speak")}
+                  className={`flex h-10 items-center gap-2 text-[14px] ${
+                    inputMode === "speak" ? "font-medium text-forest" : "text-muted"
+                  }`}
+                >
+                  <MicIcon size={20} />
+                  Speak
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectMode("type")}
+                  className={`flex h-10 items-center gap-2 rounded-[5px] px-3 text-[14px] ${
+                    inputMode === "type" ? "bg-mint font-medium text-forest" : "text-muted"
+                  }`}
+                >
+                  <KeyboardIcon size={20} />
+                  Type
+                </button>
+                <p className="ml-auto text-right text-[10px] text-muted">No perfect words needed.</p>
+              </div>
+
+              {inputMode === "type" ? (
+                <div className="flex h-16 items-center gap-[30px] rounded-[9px] border border-line pl-[18px] pr-[14px]">
+                  <input
+                    aria-label="Your response"
+                    maxLength={8000}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                    placeholder={timeLeft <= 0 || !session ? "Choose a scenario to begin…" : "Type your response…"}
+                    disabled={!session || sending || isRecording || voice.starting || completing || timeLeft <= 0}
+                    className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-muted disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={sendMessage}
+                    aria-label="Send response"
+                    disabled={!message.trim() || sending || isRecording || voice.starting || completing || timeLeft <= 0}
+                    className="flex h-11 w-[46px] shrink-0 items-center justify-center rounded-lg bg-forest text-[16px] font-bold text-white disabled:opacity-40"
+                  >
+                    ↑
+                  </button>
                 </div>
               ) : (
-                <div className="rounded-2xl border border-neutral-200 p-4 text-sm text-neutral-400">
-                  Loading context…
-                </div>
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  disabled={!session || sending || completing || voice.starting || timeLeft <= 0}
+                  className={`flex h-16 items-center justify-center gap-2 rounded-lg border text-[14px] font-medium disabled:opacity-40 ${
+                    isRecording
+                      ? "animate-pulse border-red-200 bg-red-50 text-red-700"
+                      : "border-line bg-mint text-forest"
+                  }`}
+                >
+                  <MicIcon size={20} />
+                  {isRecording ? "Stop recording" : "Start speaking"}
+                </button>
               )}
+
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => completeConversation()}
+                  disabled={!session || completing || sending || isRecording || voice.starting || !session?.turns.some(t => t.speaker === "user")}
+                  className="flex h-9 shrink-0 items-center justify-center rounded-md border border-forest px-[22px] text-[12px] font-bold text-forest disabled:opacity-40"
+                >
+                  {completing ? (timeLeft <= 0 ? "Time's up! Generating…" : "Completing…") : "End conversation"}
+                </button>
+                <button
+                  type="button"
+                  onClick={newConversation}
+                  disabled={sending || isRecording || voice.starting || completing}
+                  className="shrink-0 text-[12px] text-muted underline disabled:opacity-40"
+                >
+                  New conversation
+                </button>
+                <p className="ml-auto hidden text-right text-[11px] text-muted sm:block">
+                  You can switch between typing and speaking at any time.
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          </section>
+        </div>
       </main>
     </AuthGate>
   );
 }
+
+function GuidancePlaceholder({ loading }: { loading: boolean }) {
+  return (
+    <aside className="flex w-full flex-col gap-7">
+      <section className="flex flex-col gap-5">
+        <h2 className="text-[12px] font-bold tracking-[1.2px] text-muted">MEET YOUR PARTNER</h2>
+        <div className="flex items-center gap-[14px]">
+          <div className="size-[62px] shrink-0 rounded-full bg-line" />
+          <div>
+            <p className="text-[18px] font-medium text-ink">
+              {loading ? "Finding your partner…" : "Your practice partner"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              {loading ? "Loading scenario" : "Choose a scenario to meet your partner"}
+            </p>
+          </div>
+        </div>
+        <div className="h-10 rounded bg-mint" />
+      </section>
+      <section className="flex flex-col gap-3 rounded-xl border border-line bg-mint p-6">
+        <SparklesIcon size={24} className="text-forest" />
+        <h2 className="text-[18px] font-bold leading-6 text-ink">Your conversation goal</h2>
+        <p className="text-[14px] leading-6 text-muted">
+          {loading ? "Loading your goal…" : "Your goal will appear here once you choose a scenario."}
+        </p>
+      </section>
+      <section>
+        <h2 className="text-[17px] font-medium leading-6 text-ink">A few gentle pointers</h2>
+        <ul className="mt-2 flex flex-col gap-2">
+          {["Start with a simple hello and your name.", "Ask an open-ended question and be curious.", "Share a little about your work or interests."].map((tip) => (
+            <li key={tip} className="flex items-start gap-[14px]">
+              <CheckIcon size={18} className="mt-0.5 shrink-0 text-forest" />
+              <span className="text-[12px] leading-[1.8] text-muted">{tip}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </aside>
+  );
+}
+
 
 function MicQualityBadge({
   quality,
@@ -489,20 +642,5 @@ function MicQualityBadge({
         </p>
       )}
     </div>
-  );
-}
-
-function MicIcon({ recording }: { recording: boolean }) {
-  return recording ? (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  ) : (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-      <line x1="8" y1="23" x2="16" y2="23" />
-    </svg>
   );
 }

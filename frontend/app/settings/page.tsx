@@ -17,59 +17,62 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <AuthGate>
-      <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+    <AuthGate title="My account">
+      <main className="w-full px-6 pb-16 pt-9 lg:px-[38px]">
+        <section className="flex flex-col gap-3 pb-9">
+          <p className="text-[11px] font-bold tracking-[1px] text-forest">MY ACCOUNT</p>
+          <h1 className="font-display text-[34px] font-semibold leading-tight text-ink">
+            Settings
+          </h1>
+          <p className="text-[16px] text-muted">Your account and practice environment.</p>
+        </section>
 
-        <section className="mt-8">
-          <h2 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-3">
-            Account
-          </h2>
-          <div className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
+        <div className="flex max-w-[820px] flex-col gap-7">
+          <SettingsSection title="Account">
             <Row label="Name" value={user?.fullName || user?.username || "—"} />
             <Row label="Email" value={user?.primaryEmailAddress?.emailAddress || "—"} />
-          </div>
-        </section>
+          </SettingsSection>
 
-        <section className="mt-8">
-          <h2 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-3">
-            Backend
-          </h2>
-          <div className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
+          <SettingsSection title="Backend">
             <Row label="Status" value={health} />
             <Row label="API URL" value={ROOT} />
-          </div>
-        </section>
+          </SettingsSection>
 
-        <section className="mt-8">
-          <h2 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-3">
-            Preferences
-          </h2>
-          <div className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
-            <div className="flex items-center justify-between px-5 py-3">
+          <SettingsSection title="Preferences">
+            <div className="flex items-center justify-between px-5 py-4">
               <div>
-                <div className="text-sm">Dark mode</div>
-                <div className="text-xs text-neutral-400">Coming soon</div>
+                <p className="text-[14px] font-medium text-ink">Dark mode</p>
+                <p className="mt-1 text-[12px] text-muted">Coming soon</p>
               </div>
               <button
                 disabled
-                className="w-10 h-6 rounded-full bg-neutral-200 relative pointer-events-none"
+                aria-label="Dark mode coming soon"
+                className="pointer-events-none relative h-6 w-10 rounded-full bg-line"
               >
-                <span className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow" />
+                <span className="absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow" />
               </button>
             </div>
-          </div>
-        </section>
+          </SettingsSection>
+        </div>
       </main>
     </AuthGate>
   );
 }
 
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-[11px] font-bold tracking-[1px] text-muted">{title}</h2>
+      <div className="divide-y divide-line rounded-xl border border-line bg-white">{children}</div>
+    </section>
+  );
+}
+
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-5 py-3">
-      <div className="text-sm text-neutral-500">{label}</div>
-      <div className="text-sm font-medium">{value}</div>
+    <div className="flex items-center justify-between gap-4 px-5 py-4">
+      <p className="text-[13px] text-muted">{label}</p>
+      <p className="text-right text-[14px] font-medium text-ink">{value}</p>
     </div>
   );
 }

@@ -8,9 +8,10 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
-    PROJECT_NAME: str = "Verity"
+    PROJECT_NAME: str = "Delphi"
     VERSION: str = "0.1.0"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
@@ -25,10 +26,7 @@ class Settings(BaseSettings):
     CLERK_AUDIENCE: str = ""
     CLERK_AUTHORIZED_PARTIES: List[str] = ["http://localhost:3000"]
 
-    DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/verity"
-    SECRET_KEY: str = "change-me-to-a-random-secret-key"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/delphi"
 
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
@@ -66,7 +64,7 @@ class Settings(BaseSettings):
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
-    R2_BUCKET_NAME: str = "verity-reports"
+    R2_BUCKET_NAME: str = "delphi-reports"
     R2_PUBLIC_BASE_URL: str = ""
 
     @property

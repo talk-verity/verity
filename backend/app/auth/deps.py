@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwk, jwt
 from jose.constants import ALGORITHMS
@@ -54,8 +54,10 @@ def verify_clerk_token(token: str) -> dict:
             issuer=f"https://{settings.CLERK_DOMAIN}", audience=settings.CLERK_AUDIENCE or None,
             options={"require_exp": True, "require_sub": True, "require_iss": True,
                      "verify_aud": bool(settings.CLERK_AUDIENCE)})
-        if payload.get("azp") and payload["azp"] not in settings.CLERK_AUTHORIZED_PARTIES:
-            raise ValueError("Unauthorized origin")
+        if settings.CLERK_AUTHORIZED_PARTIES:
+            azp = payload.get("azp")
+            if not azp or azp not in settings.CLERK_AUTHORIZED_PARTIES:
+                raise ValueError("Unauthorized origin")
         if payload.get("sts") == "pending":
             raise ValueError("Pending session")
         return payload
@@ -66,6 +68,7 @@ def verify_clerk_token(token: str) -> dict:
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
+    referral_code: str | None = Header(default=None, alias="X-Delphi-Referral"),
 ) -> User:
     payload = verify_clerk_token(credentials.credentials)
     clerk_id = payload.get("sub")
@@ -79,6 +82,14 @@ def get_current_user(
         first_name = payload.get("given_name", "")
         last_name = payload.get("family_name", "")
         user = User(clerk_id=clerk_id, email=email, first_name=first_name, last_name=last_name)
+        if referral_code:
+            from app.models.referral_code import ReferralCode
+            code = db.query(ReferralCode).filter(
+                ReferralCode.code == referral_code,
+                ReferralCode.active.is_(True),
+            ).first()
+            if code:
+                user.referral_code = code.code
         db.add(user)
         try:
             db.commit()

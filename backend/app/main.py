@@ -1,3 +1,4 @@
+from app.admin.router import router as admin_router
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 from starlette.concurrency import run_in_threadpool
@@ -23,18 +24,43 @@ async def lifespan(app):
         await run_in_threadpool(get_tts_service().warmup)
     yield
 
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
+docs_enabled = settings.DEBUG
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    lifespan=lifespan,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
+)
 from app.core.body_limit import BodyLimitMiddleware
 app.add_middleware(BodyLimitMiddleware, max_bytes=settings.MAX_AUDIO_BYTES + 65536)
+
+if "*" in settings.BACKEND_CORS_ORIGINS:
+    raise RuntimeError("Wildcard CORS origins are not allowed with credentialed requests")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-Delphi-Referral"],
 )
 
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(conversations_router, prefix=settings.API_V1_PREFIX)
 app.include_router(voice_router, prefix=settings.API_V1_PREFIX)

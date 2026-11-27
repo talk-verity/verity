@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
@@ -30,7 +31,7 @@ class ConversationResponse(BaseModel):
 
 
 class ConversationCompleteRequest(BaseModel):
-    reason: str | None = None
+    reason: Literal["time_expired"] | None = None
 
 
 class TurnCreate(BaseModel):

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class PineconeClient:
-    INDEX_NAME = "verity"
+    INDEX_NAME = "delphi"
 
     def __init__(self, api_key: str | None = None, environment: str | None = None):
         self.api_key = api_key or settings.PINECONE_API_KEY
@@ -73,7 +73,7 @@ class PineconeClient:
 
 
 class MockPineconeClient:
-    INDEX_NAME = "verity"
+    INDEX_NAME = "delphi"
 
     def __init__(self):
         self._vectors: list[dict[str, Any]] = []

@@ -34,7 +34,7 @@ def main():
     if occupied:
         sys.exit(
             f"Cannot start another instance: port(s) {', '.join(occupied)} are already in use.\n"
-            "If Verity is already running, open http://127.0.0.1:3000.\n"
+            "If Delphi is already running, open http://127.0.0.1:3000.\n"
             "To restart it, press Ctrl+C in its original terminal first.\n"
             "Inspect listeners with: lsof -nP -iTCP:3000 -iTCP:8000 -sTCP:LISTEN\n"
             "No services were started or stopped."
@@ -45,7 +45,7 @@ def main():
         sys.exit("Start Docker Desktop, wait for it to be ready, then run this command again.")
     subprocess.run(["docker", "compose", "up", "-d"], cwd=ROOT, check=True)
     for _ in range(60):
-        ready = subprocess.run(["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "verity"], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ready = subprocess.run(["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "delphi"], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if ready.returncode == 0:
             break
         time.sleep(1)
@@ -60,7 +60,7 @@ def main():
         (["node", "node_modules/next/dist/bin/next", "dev", "--webpack", "--port", "3000"], ROOT / "frontend"),
     ]:
         children.append(subprocess.Popen(command, cwd=cwd, start_new_session=True))
-    print("Verity: http://localhost:3000 — Ctrl+C stops the app processes.", flush=True)
+    print("Delphi: http://localhost:3000 — Ctrl+C stops the app processes.", flush=True)
     while all(child.poll() is None for child in children):
         time.sleep(1)
     print("A service exited. Stopping the remaining app processes.", flush=True)
