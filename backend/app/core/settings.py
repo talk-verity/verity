@@ -8,6 +8,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     PROJECT_NAME: str = "Delphi"
@@ -26,9 +27,6 @@ class Settings(BaseSettings):
     CLERK_AUTHORIZED_PARTIES: List[str] = ["http://localhost:3000"]
 
     DATABASE_URL: str = "postgresql+psycopg://user:password@localhost:5432/delphi"
-    SECRET_KEY: str = "change-me-to-a-random-secret-key"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 

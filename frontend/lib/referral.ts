@@ -10,8 +10,12 @@ export function parseReferralCookie(cookieHeader: string): string | null {
   for (const part of cookieHeader.split(";")) {
     const [name, ...rest] = part.trim().split("=");
     if (name === REFERRAL_COOKIE) {
-      const value = decodeURIComponent(rest.join("="));
-      return isValidReferralCode(value) ? value : null;
+      try {
+        const value = decodeURIComponent(rest.join("="));
+        return isValidReferralCode(value) ? value : null;
+      } catch {
+        return null;
+      }
     }
   }
   return null;

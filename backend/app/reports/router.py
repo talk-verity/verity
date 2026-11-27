@@ -89,7 +89,14 @@ def download_report(
     data = service.download_html(db, report_id, current_user.id)
     if data is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return Response(content=data, media_type="text/html")
+    return Response(
+        content=data,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": 'attachment; filename="delphi-report.html"',
+            "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+        },
+    )
 
 
 @router.post("/{report_id}/process", response_model=RetryResponse)

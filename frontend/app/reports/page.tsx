@@ -30,32 +30,37 @@ export default function ReportsPage() {
   }, [isSignedIn, getToken]);
 
   return (
-    <AuthGate>
-      <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Feedback from your completed conversations.
-        </p>
+    <AuthGate title="My progress">
+      <main className="w-full px-6 pb-16 pt-9 lg:px-[38px]">
+        <section className="flex flex-col gap-3 pb-9">
+          <p className="text-[11px] font-bold tracking-[1px] text-forest">YOUR PRACTICE</p>
+          <h1 className="font-display text-[34px] font-semibold leading-tight text-ink">
+            My progress
+          </h1>
+          <p className="text-[16px] text-muted">Feedback from your completed conversations.</p>
+        </section>
 
         {error && (
-          <div className="mt-6 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        <div className="mt-8 space-y-2">
+        <div className="flex flex-col gap-3">
           {loading && (
-            <div className="flex justify-center py-12">
-              <p className="text-sm text-neutral-400 animate-pulse">Loading reports…</p>
-            </div>
+            <>
+              <div className="h-[84px] rounded-xl border border-line bg-white" />
+              <div className="h-[84px] rounded-xl border border-line bg-white" />
+              <div className="h-[84px] rounded-xl border border-line bg-white" />
+            </>
           )}
 
           {!loading && reports.length === 0 && !error && (
-            <div className="text-center py-16">
-              <p className="text-sm text-neutral-400">No reports yet.</p>
+            <div className="flex flex-col items-center gap-4 rounded-xl border border-line bg-white px-6 py-16 text-center">
+              <p className="text-[14px] text-muted">No reports yet. Your feedback will appear here.</p>
               <Link
                 href="/scenarios"
-                className="inline-block mt-4 bg-neutral-900 text-white rounded-2xl px-5 py-2.5 text-sm font-medium"
+                className="rounded-lg bg-forest px-5 py-3 text-[13px] font-bold text-white"
               >
                 Start practicing
               </Link>
@@ -65,12 +70,12 @@ export default function ReportsPage() {
           {reports.map((r) => (
             <Link
               key={r.id}
-              href={`/reports/${r.id}`}
-              className="flex items-center justify-between border border-neutral-200 rounded-xl px-5 py-4 hover:border-neutral-400 transition-colors"
+              href={`/reports/${encodeURIComponent(String(r.id))}`}
+              className="flex items-center justify-between gap-4 rounded-xl border border-line bg-white px-5 py-4 transition-colors hover:border-forest"
             >
-              <div>
-                <div className="text-sm font-medium">{r.title}</div>
-                <div className="text-xs text-neutral-400 mt-0.5">{formatDate(r.created_at)}</div>
+              <div className="min-w-0">
+                <p className="text-[15px] font-medium text-ink">{r.title}</p>
+                <p className="mt-1 text-[12px] text-muted">{formatDate(r.created_at)}</p>
               </div>
               <StatusBadge status={r.status} />
             </Link>

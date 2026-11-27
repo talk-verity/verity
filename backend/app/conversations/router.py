@@ -132,7 +132,7 @@ def complete_conversation(
     now = datetime.now(timezone.utc)
     created_at = session.created_at if session.created_at.tzinfo else session.created_at.replace(tzinfo=timezone.utc)
     elapsed_seconds = (now - created_at).total_seconds()
-    is_timed_out = bool(body and body.reason == "time_expired") or elapsed_seconds >= 300
+    is_timed_out = elapsed_seconds >= 300
 
     has_user_turn = db.query(Turn).filter(Turn.session_id == session.id, Turn.speaker == "user").first() is not None
     if not is_timed_out and not has_user_turn:

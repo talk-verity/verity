@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
@@ -62,9 +63,24 @@ def test_complete_conversation_timed_out_allows_zero_user_turns(db_session):
     db_session.add(user)
     db_session.flush()
 
-    session = SessionModel(id="to-session-1", user_id=uid, scenario="networking_event", status="active")
-    db_session.add(session)
-    db_session.add(Turn(session_id=session.id, speaker="ai", content="Hi, I'm Jordan."))
+    fresh = SessionModel(
+        id="to-session-fresh",
+        user_id=uid,
+        scenario="networking_event",
+        status="active",
+    )
+    session = SessionModel(
+        id="to-session-1",
+        user_id=uid,
+        scenario="networking_event",
+        status="active",
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=301),
+    )
+    db_session.add_all([fresh, session])
+    db_session.add_all([
+        Turn(session_id=fresh.id, speaker="ai", content="Hi, I'm Jordan."),
+        Turn(session_id=session.id, speaker="ai", content="Hi, I'm Jordan."),
+    ])
     db_session.commit()
 
     app.dependency_overrides[get_db] = lambda: db_session
@@ -72,7 +88,7 @@ def test_complete_conversation_timed_out_allows_zero_user_turns(db_session):
     try:
         with TestClient(app) as client:
             # 1. Normal completion with 0 user turns fails with 422
-            res = client.post(f"/api/v1/conversations/{session.id}/complete")
+            res = client.post(f"/api/v1/conversations/{fresh.id}/complete")
             assert res.status_code == 422
 
             # 2. Timeout completion with 0 user turns succeeds

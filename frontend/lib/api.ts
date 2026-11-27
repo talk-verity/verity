@@ -100,10 +100,10 @@ export async function authedFetch(getToken: () => Promise<string | null>, path: 
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
+      ...init?.headers,
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       ...(referral ? { "X-Delphi-Referral": referral } : {}),
-      ...init?.headers,
     },
   });
   if (!res.ok) {

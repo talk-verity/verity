@@ -31,42 +31,53 @@ export default function ReferralsPage() {
   }, [isSignedIn, getToken]);
 
   return (
-    <AuthGate>
-      <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Partner referrals</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Unique Delphi accounts created through each partner link.
-        </p>
+    <AuthGate title="Partner referrals">
+      <main className="w-full px-6 pb-16 pt-9 lg:px-[38px]">
+        <section className="flex flex-col gap-3 pb-9">
+          <p className="text-[11px] font-bold tracking-[1px] text-forest">PARTNER REFERRALS</p>
+          <h1 className="font-display text-[34px] font-semibold leading-tight text-ink">
+            Partner referrals
+          </h1>
+          <p className="text-[16px] text-muted">
+            Unique Delphi accounts created through each partner link.
+          </p>
+        </section>
 
         {error && (
-          <div className="mt-6 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="mb-6 rounded-xl border border-line bg-red-50 px-5 py-4 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {loading && <p className="mt-8 text-sm text-neutral-400 animate-pulse">Loading…</p>}
+        {loading && (
+          <div className="flex flex-col gap-3">
+            <div className="h-12 rounded-xl bg-mint" />
+            <div className="h-16 rounded-xl border border-line bg-white" />
+            <div className="h-16 rounded-xl border border-line bg-white" />
+          </div>
+        )}
 
         {!loading && !error && (
-          <div className="mt-8 overflow-hidden rounded-xl border border-neutral-200">
-            <table className="w-full text-sm">
-              <thead className="bg-neutral-50 text-left text-neutral-500">
+          <div className="overflow-hidden rounded-xl border border-line bg-white">
+            <table className="w-full text-[13px]">
+              <thead className="bg-mint text-left text-muted">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Partner</th>
-                  <th className="px-4 py-3 font-medium">Link code</th>
-                  <th className="px-4 py-3 text-right font-medium">Unique users</th>
+                  <th className="px-5 py-4 font-medium">Partner</th>
+                  <th className="px-5 py-4 font-medium">Link code</th>
+                  <th className="px-5 py-4 text-right font-medium">Unique users</th>
                 </tr>
               </thead>
               <tbody>
                 {referrals.map((referral) => (
-                  <tr key={referral.code} className="border-t border-neutral-200">
-                    <td className="px-4 py-3">{referral.label}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{referral.code}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{referral.unique_users}</td>
+                  <tr key={referral.code} className="border-t border-line">
+                    <td className="px-5 py-4 text-ink">{referral.label}</td>
+                    <td className="px-5 py-4 text-[12px] text-muted">{referral.code}</td>
+                    <td className="px-5 py-4 text-right tabular-nums text-ink">{referral.unique_users}</td>
                   </tr>
                 ))}
                 {referrals.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-neutral-400">
+                    <td colSpan={3} className="px-5 py-10 text-center text-muted">
                       No referral links configured.
                     </td>
                   </tr>

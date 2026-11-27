@@ -153,6 +153,51 @@ def test_rotated_jwks_refresh(monkeypatch):
     assert deps.verify_clerk_token(token)["sub"] == "u"
     assert fetch.call_count == 1
 
+
+def test_clerk_token_without_authorized_party_is_rejected(monkeypatch):
+    from app.auth import deps
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    from jose import jwt, jwk
+
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = private.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public = private.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    key = jwk.construct(public, algorithm="RS256").to_dict()
+    key["kid"] = "no-azp-key"
+    monkeypatch.setattr(deps, "jwks_cache", None)
+    monkeypatch.setattr(deps, "_jwks_loaded", 0.0)
+    monkeypatch.setattr(deps.settings, "CLERK_DOMAIN", "example.clerk.test")
+    monkeypatch.setattr(deps.settings, "CLERK_AUTHORIZED_PARTIES", ["http://localhost:3000"])
+    response = Mock()
+    response.json.return_value = {"keys": [key]}
+    monkeypatch.setattr(deps.httpx, "get", Mock(return_value=response))
+    token = jwt.encode(
+        {"sub": "u", "iss": "https://example.clerk.test", "exp": time.time() + 60},
+        pem,
+        algorithm="RS256",
+        headers={"kid": "no-azp-key"},
+    )
+    with pytest.raises(HTTPException) as error:
+        deps.verify_clerk_token(token)
+    assert error.value.status_code == 401
+
+
+def test_security_headers_are_present():
+    with TestClient(app) as client:
+        response = client.get("/live")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
 @pytest.mark.asyncio
 async def test_voice_work_does_not_block_event_loop(db_session):
     import asyncio

@@ -55,7 +55,8 @@ uses pyproject.toml; .vercelignore excludes the large local requirements.txt and
 model assets. Do not configure a build step that runs migrations against the
 production database on every preview deployment.
 
-Add the variables from backend/.env.vercel.example in the Vercel environment UI.
+Use backend/.env.vercel.example as the variable checklist, but copy real values
+only from your private backend/.env.vercel file into the Vercel environment UI.
 Replace placeholders with your Neon URL, existing Clerk domain, Groq key, and
 the intended frontend origin. Copy CLERK_DOMAIN and GROQ_API_KEY privately from
 backend/.env. The API verifies Clerk's JWTs with public signing keys and does not
@@ -79,11 +80,11 @@ Set Production variables:
 ```dotenv
 NEXT_PUBLIC_API_URL=https://YOUR_API.vercel.app/api/v1
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=YOUR_EXISTING_CLERK_PUBLISHABLE_KEY
-CLERK_SECRET_KEY=YOUR_EXISTING_CLERK_SECRET_KEY
 ```
 
-Copy Clerk keys privately from frontend/.env.local. The keys and backend Clerk
-domain must belong to the same Clerk instance. Never put secret keys in a
+Copy the publishable key privately from frontend/.env.local. The key and backend
+Clerk domain must belong to the same Clerk instance. Do not add CLERK_SECRET_KEY
+to this project; the frontend does not use it. Never put secret keys in a
 NEXT_PUBLIC variable. Deploy and note the actual frontend URL.
 
 ## 5. Connect origins and login

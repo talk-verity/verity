@@ -20,7 +20,9 @@ function formatDate(iso: string) {
 }
 
 export default function ReportDetailPage() {
-  const params = useParams<{ id: string }>();
+  const params = useParams<{ id: string | string[] }>();
+  const reportId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const encodedReportId = encodeURIComponent(reportId ?? "");
   const { isSignedIn, getToken } = useAuth();
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,20 +31,20 @@ export default function ReportDetailPage() {
 
   const fetchReport = useCallback((signal?: AbortSignal) => {
     if (!isSignedIn) return Promise.resolve();
-    return authedFetch(getToken, `/reports/${params.id}`, { signal })
+    return authedFetch(getToken, `/reports/${encodedReportId}`, { signal })
       .then(async data => {
         if (signal?.aborted) return;
         setReport(data);
         setError(null);
         if (data.status === "generating") {
-          await authedFetch(getToken, `/reports/${params.id}/process`, { method: "POST", signal });
-          const updated = await authedFetch(getToken, `/reports/${params.id}`, { signal });
+          await authedFetch(getToken, `/reports/${encodedReportId}/process`, { method: "POST", signal });
+          const updated = await authedFetch(getToken, `/reports/${encodedReportId}`, { signal });
           if (!signal?.aborted) setReport(updated);
         }
       })
       .catch(err => { if (!signal?.aborted) setError(err instanceof Error ? err.message : "Could not load feedback"); })
       .finally(() => { if (!signal?.aborted) setLoading(false); });
-  }, [isSignedIn, getToken, params.id]);
+  }, [isSignedIn, getToken, encodedReportId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,7 +68,7 @@ export default function ReportDetailPage() {
     setRetrying(true);
     setError(null);
     try {
-      await authedFetch(getToken, `/reports/${params.id}/retry`, { method: "POST" });
+      await authedFetch(getToken, `/reports/${encodedReportId}/retry`, { method: "POST" });
       setLoading(true);
       await fetchReport();
     } catch (e) {
@@ -79,7 +81,7 @@ export default function ReportDetailPage() {
     const token = await getToken();
     if (!token) return;
     try {
-      const res = await fetch(`${API}/reports/${params.id}/download`, {
+      const res = await fetch(`${API}/reports/${encodedReportId}/download`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Download failed");
@@ -97,94 +99,107 @@ export default function ReportDetailPage() {
 
   return (
     <AuthGate>
-      <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-10">
-        <Link href="/reports" className="text-sm text-neutral-400 hover:text-neutral-600">
-          ← Back to reports
-        </Link>
+      <main className="flex-1 w-full bg-canvas text-ink">
+        <div className="mx-auto max-w-[1440px] px-6 py-10 lg:px-14">
+          <Link href="/reports" className="text-sm text-muted hover:text-forest">
+            ← Back to reports
+          </Link>
 
-        {error && (
-          <div className="mt-6 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {loading && !report && (
-          <div className="flex justify-center py-16">
-            <p className="text-sm text-neutral-400 animate-pulse">Loading report…</p>
-          </div>
-        )}
-
-        {!loading && !report && !error && (
-          <div className="text-center py-16">
-            <p className="text-sm text-neutral-400">Report not found.</p>
-          </div>
-        )}
-
-        {report && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className="text-xl font-semibold">{report.title}</h1>
-                <p className="text-xs text-neutral-400 mt-1">{formatDate(report.created_at)}</p>
-              </div>
-              <StatusBadge status={report.status} />
+          {error && (
+            <div className="mt-6 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              {error}
             </div>
+          )}
 
-            {report.status === "generating" && (
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-6 py-10 text-center">
-                <div className="mx-auto w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-                <p className="mt-4 text-sm text-blue-800 font-medium">Generating your report…</p>
-                <p className="mt-1 text-xs text-blue-600">
-                  Your feedback is queued. This page updates automatically.
-                </p>
+          {loading && !report && (
+            <div className="mt-6 flex flex-col gap-6" aria-label="Loading report">
+              <div className="h-5 w-52 rounded bg-mint" />
+              <div className="h-11 w-2/3 rounded bg-mint" />
+              <div className="h-[204px] rounded-[20px] bg-forest/85" />
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-[260px] rounded-[14px] border border-line bg-white p-5">
+                    <div className="h-5 w-2/3 rounded bg-mint" />
+                    <div className="mt-4 h-9 w-1/2 rounded bg-mint-deep" />
+                  </div>
+                ))}
               </div>
-            )}
+              <p className="text-[13px] text-muted">Loading your feedback…</p>
+            </div>
+          )}
 
-            {report.status === "render_failed" && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-6 py-8 text-center">
-                <p className="text-sm text-red-800 font-medium">
-                  Rendering failed — your feedback was preserved.
-                </p>
-                <button
-                  onClick={handleRetry}
-                  disabled={retrying}
-                  className="mt-4 bg-red-700 text-white rounded-2xl px-5 py-2.5 text-sm font-medium hover:bg-red-800 disabled:opacity-40"
-                >
-                  {retrying ? "Retrying…" : "Retry rendering"}
-                </button>
+          {!loading && !report && !error && (
+            <div className="mt-6 rounded-xl border border-line bg-white px-6 py-16 text-center">
+              <p className="text-[14px] text-muted">Report not found.</p>
+            </div>
+          )}
+
+          {report && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h1 className="text-xl font-semibold text-ink">{report.title}</h1>
+                  <p className="mt-1 text-xs text-muted">{formatDate(report.created_at)}</p>
+                </div>
+                <StatusBadge status={report.status} />
               </div>
-            )}
 
-            {report.status === "failed" && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-6 py-8 text-center">
-                <p className="text-sm text-red-800 font-medium">
-                  This report failed to generate.
-                </p>
-                <button onClick={handleRetry} disabled={retrying} className="mt-4 underline">
-                  {retrying ? "Retrying…" : "Retry feedback for this conversation"}
-                </button>
-              </div>
-            )}
+              {report.status === "generating" && (
+                <div className="flex flex-col items-center rounded-[20px] border border-line bg-mint px-6 py-12 text-center">
+                  <div className="size-8 animate-spin rounded-full border-2 border-bar border-t-forest" />
+                  <p className="mt-4 text-[18px] font-medium text-ink">Generating your report…</p>
+                  <p className="mt-1 text-[13px] text-muted">
+                    Your feedback is queued. This page updates automatically.
+                  </p>
+                </div>
+              )}
 
-            {report.status === "ready" && report.content && (
-              <>
-                <ReportView content={report.content} />
-                <button
-                  onClick={handleDownload}
-                  className="mt-8 w-full bg-neutral-900 text-white rounded-2xl py-3 text-sm font-medium hover:opacity-90"
-                >
-                  Download HTML report
-                </button>
-              </>
-            )}
+              {report.status === "render_failed" && (
+                <div className="rounded-[20px] border border-line bg-white px-6 py-10 text-center">
+                  <p className="text-[18px] font-medium text-ink">
+                    Rendering failed — your feedback was preserved.
+                  </p>
+                  <button
+                    onClick={handleRetry}
+                    disabled={retrying}
+                    className="mt-5 rounded-lg bg-forest px-5 py-3 text-[13px] font-bold text-white disabled:opacity-40"
+                  >
+                    {retrying ? "Retrying…" : "Retry rendering"}
+                  </button>
+                </div>
+              )}
 
-            {report.status === "render_failed" && report.content && (
-              <div className="mt-6 opacity-60">
-                <ReportView content={report.content} />
-              </div>
-            )}
-          </div>
-        )}
+              {report.status === "failed" && (
+                <div className="rounded-[20px] border border-line bg-white px-6 py-10 text-center">
+                  <p className="text-[18px] font-medium text-ink">
+                    This report failed to generate.
+                  </p>
+                  <button onClick={handleRetry} disabled={retrying} className="mt-5 text-[13px] font-bold text-forest underline">
+                    {retrying ? "Retrying…" : "Retry feedback for this conversation"}
+                  </button>
+                </div>
+              )}
+
+              {report.status === "ready" && report.content && (
+                <>
+                  <ReportView content={report.content} />
+                  <button
+                    onClick={handleDownload}
+                    className="mt-8 w-full rounded-xl border border-line bg-white py-3 text-[13px] font-bold text-forest hover:border-forest"
+                  >
+                    Download HTML report
+                  </button>
+                </>
+              )}
+
+              {report.status === "render_failed" && report.content && (
+                <div className="mt-6 opacity-60">
+                  <ReportView content={report.content} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </main>
     </AuthGate>
   );

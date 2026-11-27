@@ -54,8 +54,10 @@ def verify_clerk_token(token: str) -> dict:
             issuer=f"https://{settings.CLERK_DOMAIN}", audience=settings.CLERK_AUDIENCE or None,
             options={"require_exp": True, "require_sub": True, "require_iss": True,
                      "verify_aud": bool(settings.CLERK_AUDIENCE)})
-        if payload.get("azp") and payload["azp"] not in settings.CLERK_AUTHORIZED_PARTIES:
-            raise ValueError("Unauthorized origin")
+        if settings.CLERK_AUTHORIZED_PARTIES:
+            azp = payload.get("azp")
+            if not azp or azp not in settings.CLERK_AUTHORIZED_PARTIES:
+                raise ValueError("Unauthorized origin")
         if payload.get("sts") == "pending":
             raise ValueError("Pending session")
         return payload
